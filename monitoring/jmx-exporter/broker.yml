@@ -1,0 +1,223 @@
+# JMX Exporter Configuration for Kafka Brokers (CP 8.0.0 / Kafka 4.0)
+#
+# IMPORTANT: Kafka 4.0 broker MBeans use standard ObjectName format:
+#   kafka.server:type=BrokerTopicMetrics,name=BytesInPerSec,topic=test
+#
+# The `name` key holds the metric name (BytesInPerSec, MessagesInPerSec, etc.)
+# Attributes are: Count (counter), OneMinuteRate, FiveMinuteRate, MeanRate
+#
+# This config exports ONLY the Count attribute for meters (used with rate() in PromQL)
+# and Value attribute for gauges, matching Grafana dashboard expectations.
+#
+# Mount this file into the broker container and set:
+#   EXTRA_ARGS: "-javaagent:/opt/jmx-exporter/jmx_prometheus_javaagent.jar=9404:/opt/jmx-exporter/broker.yml"
+
+startDelaySeconds: 0
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+rules:
+  # ---------------------------------------------------------------
+  # Broker Topic Metrics (Meters — export Count for rate() in PromQL)
+  # BytesInPerSec, BytesOutPerSec, MessagesInPerSec, etc.
+  #
+  # Dashboard queries: rate(kafka_server_brokertopicmetrics_bytesinpersec{topic="X"}[5m])
+  # ---------------------------------------------------------------
+  - pattern: kafka.server<type=BrokerTopicMetrics, name=(.+), topic=(.+)><>Count
+    name: kafka_server_brokertopicmetrics_$1
+    type: GAUGE
+    labels:
+      topic: "$2"
+
+  - pattern: kafka.server<type=BrokerTopicMetrics, name=(.+)><>Count
+    name: kafka_server_brokertopicmetrics_$1
+    type: GAUGE
+
+  # Also export OneMinuteRate for instant throughput (no rate() needed)
+  - pattern: kafka.server<type=BrokerTopicMetrics, name=(.+), topic=(.+)><>OneMinuteRate
+    name: kafka_server_brokertopicmetrics_$1_rate
+    type: GAUGE
+    labels:
+      topic: "$2"
+
+  - pattern: kafka.server<type=BrokerTopicMetrics, name=(.+)><>OneMinuteRate
+    name: kafka_server_brokertopicmetrics_$1_rate
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # Replica Manager (Gauges — export Value attribute only)
+  # UnderReplicatedPartitions, LeaderCount, PartitionCount, etc.
+  #
+  # Dashboard query: kafka_server_replicamanager_underreplicatedpartitions
+  # ---------------------------------------------------------------
+  - pattern: kafka.server<type=ReplicaManager, name=(.+)><>Value
+    name: kafka_server_replicamanager_$1
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # Request Handler Pool (Gauges)
+  # RequestHandlerAvgIdlePercent — critical for load monitoring
+  # ---------------------------------------------------------------
+  - pattern: kafka.server<type=KafkaRequestHandlerPool, name=(.+)><>OneMinuteRate
+    name: kafka_server_kafkarequesthandlerpool_$1
+    type: GAUGE
+
+  - pattern: kafka.server<type=KafkaRequestHandlerPool, name=(.+)><>Count
+    name: kafka_server_kafkarequesthandlerpool_$1_total
+    type: COUNTER
+
+  # ---------------------------------------------------------------
+  # Request Metrics — Percentiles (with quantile label)
+  # TotalTimeMs, RequestQueueTimeMs, ResponseQueueTimeMs, etc.
+  #
+  # Dashboard query: kafka_network_requestmetrics_totaltimems{request="Produce",quantile="0.99"}
+  # ---------------------------------------------------------------
+  - pattern: kafka.network<type=RequestMetrics, name=(.+), request=(.+)><>99thPercentile
+    name: kafka_network_requestmetrics_$1
+    type: GAUGE
+    labels:
+      request: "$2"
+      quantile: "0.99"
+
+  - pattern: kafka.network<type=RequestMetrics, name=(.+), request=(.+)><>95thPercentile
+    name: kafka_network_requestmetrics_$1
+    type: GAUGE
+    labels:
+      request: "$2"
+      quantile: "0.95"
+
+  - pattern: kafka.network<type=RequestMetrics, name=(.+), request=(.+)><>75thPercentile
+    name: kafka_network_requestmetrics_$1
+    type: GAUGE
+    labels:
+      request: "$2"
+      quantile: "0.75"
+
+  - pattern: kafka.network<type=RequestMetrics, name=(.+), request=(.+)><>50thPercentile
+    name: kafka_network_requestmetrics_$1
+    type: GAUGE
+    labels:
+      request: "$2"
+      quantile: "0.50"
+
+  # Request Metrics — Count (for rate())
+  - pattern: kafka.network<type=RequestMetrics, name=(.+), request=(.+)><>Count
+    name: kafka_network_requestmetrics_$1_total
+    type: GAUGE
+    labels:
+      request: "$2"
+
+  # Request Metrics — Mean
+  - pattern: kafka.network<type=RequestMetrics, name=(.+), request=(.+)><>Mean
+    name: kafka_network_requestmetrics_$1_mean
+    type: GAUGE
+    labels:
+      request: "$2"
+
+  # ---------------------------------------------------------------
+  # Socket Server Metrics
+  # NetworkProcessorAvgIdlePercent, connection counts
+  # ---------------------------------------------------------------
+  - pattern: kafka.network<type=SocketServer, name=(.+)><>Value
+    name: kafka_network_socketserver_$1
+    type: GAUGE
+
+  - pattern: kafka.network<type=SocketServer, name=(.+)><>Count
+    name: kafka_network_socketserver_$1
+    type: COUNTER
+
+  # ---------------------------------------------------------------
+  # KRaft Controller Metrics (Gauges)
+  # ActiveControllerCount, OfflinePartitionsCount, PreferredReplicaImbalanceCount
+  # ---------------------------------------------------------------
+  - pattern: kafka.controller<type=KafkaController, name=(.+)><>Value
+    name: kafka_controller_kafkacontroller_$1
+    type: GAUGE
+
+  # Controller Stats (Meters — rates)
+  - pattern: kafka.controller<type=ControllerStats, name=(.+)><>Count
+    name: kafka_controller_controllerstats_$1
+    type: COUNTER
+
+  - pattern: kafka.controller<type=ControllerStats, name=(.+)><>OneMinuteRate
+    name: kafka_controller_controllerstats_$1_rate
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # Log / Partition Metrics
+  # LogSize, LogEndOffset, LogStartOffset per topic-partition
+  # ---------------------------------------------------------------
+  - pattern: kafka.log<type=LogManager, name=(.+)><>Value
+    name: kafka_log_logmanager_$1
+    type: GAUGE
+
+  - pattern: kafka.log<type=Log, name=(.+), topic=(.+), partition=(.+)><>Value
+    name: kafka_log_log_$1
+    type: GAUGE
+    labels:
+      topic: "$2"
+      partition: "$3"
+
+  # ---------------------------------------------------------------
+  # Delayed Operations Purgatory
+  # PurgatorySize for produce, fetch, delete records
+  # ---------------------------------------------------------------
+  - pattern: kafka.server<type=DelayedOperationPurgatory, name=(.+), delayedOperation=(.+)><>Value
+    name: kafka_server_delayedoperationpurgatory_$1
+    type: GAUGE
+    labels:
+      delayed_operation: "$2"
+
+  # ---------------------------------------------------------------
+  # Group Coordinator Metrics
+  # NumGroups, NumOffsets
+  # ---------------------------------------------------------------
+  - pattern: kafka.coordinator.group<type=GroupMetadataManager, name=(.+)><>Value
+    name: kafka_coordinator_group_groupmetadatamanager_$1
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # JVM Memory Metrics
+  # ---------------------------------------------------------------
+  - pattern: java.lang<type=Memory><HeapMemoryUsage>(\w+)
+    name: jvm_memory_heap_$1
+    type: GAUGE
+
+  - pattern: java.lang<type=Memory><NonHeapMemoryUsage>(\w+)
+    name: jvm_memory_nonheap_$1
+    type: GAUGE
+
+  - pattern: java.lang<type=MemoryPool, name=(.+)><Usage>(\w+)
+    name: jvm_memory_pool_$2
+    type: GAUGE
+    labels:
+      pool: "$1"
+
+  # ---------------------------------------------------------------
+  # JVM Garbage Collection Metrics
+  # ---------------------------------------------------------------
+  - pattern: java.lang<type=GarbageCollector, name=(.+)><CollectionCount>
+    name: jvm_gc_collection_count
+    type: COUNTER
+    labels:
+      gc: "$1"
+
+  - pattern: java.lang<type=GarbageCollector, name=(.+)><CollectionTime>
+    name: jvm_gc_collection_time_ms
+    type: COUNTER
+    labels:
+      gc: "$1"
+
+  # ---------------------------------------------------------------
+  # JVM Threading Metrics
+  # ---------------------------------------------------------------
+  - pattern: java.lang<type=Threading><(\w+)>
+    name: jvm_threading_$1
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # JVM OS Metrics
+  # ---------------------------------------------------------------
+  - pattern: java.lang<type=OperatingSystem><(\w+)>
+    name: jvm_os_$1
+    type: GAUGE

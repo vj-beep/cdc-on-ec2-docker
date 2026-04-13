@@ -1,0 +1,153 @@
+# JMX Exporter Configuration for Confluent Schema Registry (CP 8.0.0)
+#
+# IMPORTANT: JMX Exporter 1.0.1 behavioral notes (same as connect.yml):
+#   - Use ([^,]+) for mid-position keys, ([^>]+) for last key before ><>
+#   - Use ([^:]+) for attribute names to avoid non-numeric ": value" suffix
+#   - lowercaseOutputName converts hyphens to underscores automatically
+#
+# MBean ObjectNames in CP 8.0.0 Schema Registry:
+#   kafka.schema.registry:type=jetty-metrics                      (HTTP server)
+#   kafka.schema.registry:type=jersey-metrics,id=<endpoint>       (per-endpoint)
+#   kafka.schema.registry:type=SchemaRegistryMetrics              (registry stats)
+#
+# Mount this file into the Schema Registry container and set:
+#   SCHEMA_REGISTRY_OPTS: "-javaagent:/etc/jmx-exporter/jmx_prometheus_javaagent.jar=9406:/etc/jmx-exporter/schema-registry.yml"
+
+startDelaySeconds: 0
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+rules:
+  # ---------------------------------------------------------------
+  # Jetty HTTP Server Metrics (server-level)
+  # connections-active, connections-opened-rate, connections-closed-rate,
+  # request-rate, request-count, request-total, busy-thread-count,
+  # thread-pool-usage, request-queue-size
+  #
+  # Dashboard queries:
+  #   kafka_schema_registry_jetty_connections_active
+  #   kafka_schema_registry_jetty_request_rate
+  #   kafka_schema_registry_jetty_busy_thread_count
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.schema\\.registry<type=jetty-metrics><>([^:]+)"
+    name: kafka_schema_registry_jetty_$1
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # Jersey Per-Endpoint Metrics (with endpoint label)
+  #
+  # CP 8.0.0 Schema Registry embeds the endpoint name IN the attribute:
+  #   MBean: kafka.schema.registry:type=jersey-metrics
+  #   Attribute: <endpoint-dots>.<request-*|response-*>
+  #   Example: compatibility.subjects.versions.verify.request-latency-99
+  #
+  # This pattern splits on the last ".request-" or ".response-" to extract
+  # the endpoint name as a label.
+  #
+  # Dashboard queries:
+  #   kafka_schema_registry_jersey_request_latency_99{endpoint=~".*"}
+  #   sum(kafka_schema_registry_jersey_request_error_rate)
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.schema\\.registry<type=jersey-metrics><>(.+)\\.(request-[^:]+|response-[^:]+)"
+    name: kafka_schema_registry_jersey_$2
+    type: GAUGE
+    labels:
+      endpoint: "$1"
+
+  # ---------------------------------------------------------------
+  # Schema Registry Global Metrics
+  #
+  # CP 8.0.0 uses INDIVIDUAL MBean types per metric (no single
+  # SchemaRegistryMetrics bean). Each type has one gauge attribute.
+  #   type=api-failure-count, type=api-success-count,
+  #   type=avro-schemas-created, type=registered-count, etc.
+  #
+  # Dashboard queries:
+  #   kafka_schema_registry_api_success_count
+  #   kafka_schema_registry_api_failure_count
+  #   kafka_schema_registry_avro_schemas_created
+  #   kafka_schema_registry_registered_count
+  # ---------------------------------------------------------------
+
+  # Master/Slave Role (explicit for dashboard traffic light)
+  - pattern: "kafka\\.schema\\.registry<type=master-slave-role><>([^:]+)"
+    name: kafka_schema_registry_master_slave_role
+    type: GAUGE
+
+  # Catch-all for ALL other SR metrics
+  # Uses only $1 (type) because in CP 8.0.0 each type has exactly
+  # one attribute — using both would produce doubled names like
+  # kafka_schema_registry_api_failure_count_api_failure_count
+  - pattern: "kafka\\.schema\\.registry<type=([^,>]+)><>([^:]+)"
+    name: kafka_schema_registry_$1
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # Internal Kafka Producer Metrics (SR writes to _schemas topic)
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.producer<type=producer-metrics, client-id=([^>]+)><>([^:]+)"
+    name: kafka_schema_registry_producer_$2
+    type: GAUGE
+    labels:
+      client_id: "$1"
+
+  # ---------------------------------------------------------------
+  # Internal Kafka Consumer Metrics (SR reads _schemas topic)
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.consumer<type=consumer-fetch-manager-metrics, client-id=([^>]+)><>([^:]+)"
+    name: kafka_schema_registry_consumer_$2
+    type: GAUGE
+    labels:
+      client_id: "$1"
+
+  - pattern: "kafka\\.consumer<type=consumer-coordinator-metrics, client-id=([^>]+)><>([^:]+)"
+    name: kafka_schema_registry_consumer_coordinator_$2
+    type: GAUGE
+    labels:
+      client_id: "$1"
+
+  # ---------------------------------------------------------------
+  # JVM Memory Metrics
+  # ---------------------------------------------------------------
+  - pattern: "java\\.lang<type=Memory><HeapMemoryUsage>(.+)"
+    name: jvm_memory_heap_$1
+    type: GAUGE
+
+  - pattern: "java\\.lang<type=Memory><NonHeapMemoryUsage>(.+)"
+    name: jvm_memory_nonheap_$1
+    type: GAUGE
+
+  - pattern: "java\\.lang<type=MemoryPool, name=([^>]+)><Usage>(.+)"
+    name: jvm_memory_pool_$2
+    type: GAUGE
+    labels:
+      pool: "$1"
+
+  # ---------------------------------------------------------------
+  # JVM Garbage Collection
+  # ---------------------------------------------------------------
+  - pattern: "java\\.lang<type=GarbageCollector, name=([^>]+)><>CollectionCount"
+    name: jvm_gc_collection_count
+    type: COUNTER
+    labels:
+      gc: "$1"
+
+  - pattern: "java\\.lang<type=GarbageCollector, name=([^>]+)><>CollectionTime"
+    name: jvm_gc_collection_time_ms
+    type: COUNTER
+    labels:
+      gc: "$1"
+
+  # ---------------------------------------------------------------
+  # JVM Threading
+  # ---------------------------------------------------------------
+  - pattern: "java\\.lang<type=Threading><>([^:]+)"
+    name: jvm_threading_$1
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # JVM OS Metrics
+  # ---------------------------------------------------------------
+  - pattern: "java\\.lang<type=OperatingSystem><>([^:]+)"
+    name: jvm_os_$1
+    type: GAUGE

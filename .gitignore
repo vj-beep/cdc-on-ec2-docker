@@ -1,0 +1,20 @@
+# Environment Configuration (contains secrets)
+.env
+.env.backup.*
+!.env.template
+!.env.snapshot
+!.env.streaming
+
+# Internal tooling and builds
+
+# JDBC Drivers & Large Binaries
+# Note: mssql-jdbc is committed; JMX exporter JARs may be added later
+!connect/jars/mssql-jdbc-*.jar
+monitoring/jmx-exporter/*.jar
+
+# Generated prometheus config (resolved from .template by 5-start-node.sh)
+monitoring/prometheus/prometheus.yml
+
+# Docker & local artifacts
+.DS_Store
+*.log

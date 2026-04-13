@@ -1,0 +1,18 @@
+# Grafana Dashboard Provisioning
+# Loads dashboard JSON files from the dashboards directory
+
+apiVersion: 1
+
+providers:
+  - name: "CDC Pipeline Dashboards"
+    orgId: 1
+    folder: "CDC Pipeline"
+    folderUid: "cdc-pipeline"
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

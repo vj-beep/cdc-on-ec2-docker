@@ -1,0 +1,40 @@
+# ============================================================
+# Node 5: Control Center + ksqlDB + Monitoring + Alerting
+# Requirements: 4+ vCPU, 16+ GB RAM, 50+ GB SSD storage (for Prometheus time-series)
+# ============================================================
+# IMPORTANT: Must specify services explicitly to avoid attempting to build
+# Connect image (which should only be built once on Node 4).
+#
+# CORRECT USAGE — Specify services explicitly:
+#   docker compose -f docker-compose.yml -f docker-compose.ksqldb-monitoring.yml \
+#     up -d control-center ksqldb-server rest-proxy flink-jobmanager flink-taskmanager \
+#     prometheus grafana alertmanager node-exporter cadvisor profile-exporter
+#
+# WRONG (will attempt to build Connect image):
+#   docker compose -f docker-compose.yml -f docker-compose.ksqldb-monitoring.yml up -d
+#
+# Or use helper script:
+#   ./scripts/5-start-node.sh monitor
+
+services:
+  control-center: {}
+
+  ksqldb-server: {}
+
+  rest-proxy: {}
+
+  flink-jobmanager: {}
+
+  flink-taskmanager: {}
+
+  prometheus: {}
+
+  grafana: {}
+
+  alertmanager: {}
+
+  node-exporter: {}
+
+  cadvisor: {}
+
+  profile-exporter: {}

@@ -1,0 +1,29 @@
+# ============================================================
+# Node 4: Connect Workers (forward + reverse) + Schema Registry
+# Requirements: 4+ vCPU, 16+ GB RAM, 20+ GB storage
+# ============================================================
+# IMPORTANT: Must specify services explicitly to avoid issues.
+#
+# CORRECT USAGE — Specify services explicitly:
+#   docker compose -f docker-compose.yml -f docker-compose.connect-schema-registry.yml \
+#     up -d connect-1 connect-2 schema-registry node-exporter cadvisor
+#
+# WRONG (may start unintended services):
+#   docker compose -f docker-compose.yml -f docker-compose.connect-schema-registry.yml up -d
+#
+# Or use helper script:
+#   ./scripts/5-start-node.sh connect
+#
+# PREREQUISITE: Build custom Connect image first:
+#   docker compose -f docker-compose.connect-build.yml build
+
+services:
+  connect-1: {}
+
+  connect-2: {}
+
+  schema-registry: {}
+
+  node-exporter: {}
+
+  cadvisor: {}

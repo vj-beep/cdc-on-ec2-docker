@@ -1,0 +1,26 @@
+# ============================================================
+# Node 1: Broker 1 (KRaft Controller)
+# Requirements: 8+ vCPU, 32+ GB RAM, 100+ GB NVMe-equivalent storage
+# ============================================================
+# IMPORTANT: Must specify services explicitly to avoid starting
+# unwanted services from base compose (e.g., Connect, monitoring).
+#
+# CORRECT USAGE — Specify services explicitly:
+#   docker compose -f docker-compose.yml -f docker-compose.broker1.yml \
+#     up -d broker node-exporter cadvisor
+#
+# WRONG (will fail or start unintended services):
+#   docker compose -f docker-compose.yml -f docker-compose.broker1.yml up -d
+#
+# Or use helper script:
+#   ./scripts/5-start-node.sh broker1
+
+services:
+  broker:
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${BROKER_1_IP}:9092
+
+  node-exporter: {}
+
+  cadvisor: {}

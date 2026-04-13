@@ -1,0 +1,18 @@
+# Grafana Datasource Provisioning
+# Prometheus runs on the same host (network_mode: host) on port 9090
+# CloudWatch uses EC2 instance IAM role credentials (no keys needed)
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://localhost:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: "15s"
+      httpMethod: POST
+    version: 1

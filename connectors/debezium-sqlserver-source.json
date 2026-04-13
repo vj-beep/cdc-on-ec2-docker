@@ -1,0 +1,44 @@
+{
+  "name": "debezium-sqlserver-source",
+  "config": {
+    "connector.class": "io.debezium.connector.sqlserver.SqlServerConnector",
+    "tasks.max": "1",
+
+    "database.hostname": "${SQLSERVER_HOST}",
+    "database.port": "${SQLSERVER_PORT}",
+    "database.user": "${SQLSERVER_USER}",
+    "database.password": "${SQLSERVER_PASSWORD}",
+    "database.names": "${SQLSERVER_DATABASE}",
+    "database.encrypt": "false",
+
+    "topic.prefix": "${SQLSERVER_TOPIC_PREFIX}",
+    "table.include.list": "${SQLSERVER_TABLE_INCLUDE_LIST}",
+    "message.key.columns": "${SQLSERVER_MESSAGE_KEY_COLUMNS}",
+    "schema.history.internal.kafka.bootstrap.servers": "${BROKER_1_IP}:9092,${BROKER_2_IP}:9092,${BROKER_3_IP}:9092",
+    "schema.history.internal.kafka.topic": "${SQLSERVER_SCHEMA_HISTORY_TOPIC}",
+    "schema.history.internal.kafka.topic.replication.factor": "${KAFKA_REPLICATION_FACTOR}",
+
+    "topic.creation.default.replication.factor": "${KAFKA_REPLICATION_FACTOR}",
+    "topic.creation.default.partitions": "3",
+    "topic.creation.default.cleanup.policy": "delete",
+    "topic.creation.default.retention.ms": "259200000",
+
+    "snapshot.mode": "${DEBEZIUM_SNAPSHOT_MODE}",
+
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
+
+    "poll.interval.ms": "50",
+    "max.batch.size": "8192",
+    "max.queue.size": "32768",
+
+    "producer.override.linger.ms": "0",
+
+    "transforms": "addSource",
+    "transforms.addSource.type": "org.apache.kafka.connect.transforms.InsertHeader",
+    "transforms.addSource.header": "__cdc_from_sqlserver",
+    "transforms.addSource.value.literal": "true"
+  }
+}

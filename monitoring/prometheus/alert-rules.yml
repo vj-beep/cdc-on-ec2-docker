@@ -1,0 +1,225 @@
+# Prometheus Alert Rules for CDC deployment — Confluent Platform
+#
+# Covers all 4 core KPIs: throughput, lag, latency, connector failures.
+# Plus infrastructure health and DLQ monitoring.
+
+groups:
+  # ---------------------------------------------------------------
+  # CDC Lag SLA Alerts
+  # ---------------------------------------------------------------
+  - name: cdc_lag_sla
+    rules:
+      - alert: CDCLagExceedsSLA
+        expr: debezium_metrics_milliseconds_behind_source{context="streaming"} > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CDC lag exceeds 1-second SLA for {{ $labels.connector }}"
+          description: "Current lag: {{ $value }}ms. SLA target: sub-second."
+
+      - alert: CDCLagCritical
+        expr: debezium_metrics_milliseconds_behind_source{context="streaming"} > 300000
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CDC lag exceeds 5 minutes for {{ $labels.connector }}"
+          description: "Source {{ $labels.plugin }} connector {{ $labels.connector }} has {{ $value }}ms lag. Investigate immediately."
+
+  # ---------------------------------------------------------------
+  # Connector Failure Alerts
+  # ---------------------------------------------------------------
+  - name: connector_failures
+    rules:
+      - alert: ConnectWorkerDown
+        expr: up{job="kafka-connect"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka Connect worker {{ $labels.instance }} is down"
+          description: "Connect worker {{ $labels.worker }} on {{ $labels.node }} has been unreachable for more than 1 minute."
+
+      - alert: ConnectorTaskFailed
+        expr: kafka_connect_connect_worker_metrics_connector_failed_task_count > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} failed tasks for connector {{ $labels.connector }}"
+          description: "Connector has failed tasks. Check Connect logs and restart."
+
+      - alert: ConnectorTaskCountMismatch
+        expr: kafka_connect_connector_metrics_connector_failed_task_count > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Connector {{ $labels.connector }} has {{ $value }} failed task(s)"
+          description: "Check Connect logs and restart the connector/task."
+
+      - alert: SinkRecordsPutRateZero
+        expr: kafka_connect_sink_task_metrics_sink_record_send_rate == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Sink connector {{ $labels.connector }} has zero put rate"
+          description: "No records written for 10 minutes. Check source activity and connector status."
+
+  # ---------------------------------------------------------------
+  # DLQ Alerts
+  # ---------------------------------------------------------------
+  - name: dlq_alerts
+    rules:
+      - alert: DLQRecordsReceived
+        expr: rate(kafka_server_brokertopicmetrics_messagesinpersec{topic=~"dlq-.*"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Records landing in DLQ topic {{ $labels.topic }}"
+          description: "Dead letter queue topic {{ $labels.topic }} is receiving records. Investigate failed sink writes."
+
+      - alert: DLQHighVolume
+        expr: rate(kafka_server_brokertopicmetrics_messagesinpersec{topic=~"dlq-.*"}[5m]) > 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High DLQ rate on {{ $labels.topic }}: {{ $value }} msg/s"
+          description: "Sustained DLQ writes indicate systemic sink failure."
+
+  # ---------------------------------------------------------------
+  # Throughput Alerts
+  # ---------------------------------------------------------------
+  - name: throughput_alerts
+    rules:
+      - alert: ZeroThroughput
+        expr: sum(rate(kafka_server_brokertopicmetrics_messagesinpersec{topic!~"__.*|_schemas|connect-.*|dlq-.*"}[10m])) == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No messages flowing through CDC topics for 15 minutes"
+          description: "Zero throughput across all CDC topics. Check source connectors and database activity."
+
+  # ---------------------------------------------------------------
+  # Consumer Lag Alerts
+  # ---------------------------------------------------------------
+  - name: consumer_lag_alerts
+    rules:
+      - alert: ConsumerLagGrowing
+        expr: deriv(kafka_consumer_consumer_fetch_manager_metrics_records_lag[10m]) > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer lag growing for {{ $labels.client_id }}"
+          description: "Lag increasing at {{ $value }} records/min. Sink may not be keeping up."
+
+  # ---------------------------------------------------------------
+  # Debezium Error Alerts
+  # ---------------------------------------------------------------
+  - name: debezium_alerts
+    rules:
+      - alert: DebeziumErrors
+        expr: rate(debezium_metrics_number_of_erroneous_events{context="streaming"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Debezium erroneous events detected for {{ $labels.connector }}"
+          description: "{{ $labels.plugin }} source connector {{ $labels.connector }} is producing erroneous events."
+
+      - alert: SnapshotStalled
+        expr: changes(debezium_metrics_rows_scanned{context="snapshot"}[15m]) == 0 and debezium_metrics_remaining_table_count{context="snapshot"} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Snapshot stalled for {{ $labels.connector }}"
+          description: "Snapshot rows not progressing while tables remain. Check source DB load and connector logs."
+
+  # ---------------------------------------------------------------
+  # Kafka Broker Alerts
+  # ---------------------------------------------------------------
+  - name: kafka_broker_alerts
+    rules:
+      - alert: KafkaBrokerDown
+        expr: up{job="kafka-brokers"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka broker {{ $labels.instance }} is down"
+          description: "Broker on {{ $labels.node }} (broker_id={{ $labels.broker_id }}) unreachable for >1 minute."
+
+      - alert: UnderReplicatedPartitions
+        expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Under-replicated partitions on {{ $labels.instance }}"
+          description: "{{ $value }} under-replicated partitions. Data durability at risk."
+
+      - alert: NoActiveController
+        expr: sum(kafka_controller_kafkacontroller_activecontrollercount) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No active Kafka controller"
+          description: "Cluster cannot process partition reassignments or leader elections."
+
+      - alert: OfflinePartitions
+        expr: kafka_controller_kafkacontroller_offlinepartitionscount > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $value }} offline partitions"
+          description: "Partitions unavailable for produce and consume."
+
+  # ---------------------------------------------------------------
+  # Infrastructure Alerts
+  # ---------------------------------------------------------------
+  - name: infrastructure_alerts
+    rules:
+      - alert: BrokerDiskHigh
+        expr: (1 - node_filesystem_avail_bytes{mountpoint="/data/kafka"} / node_filesystem_size_bytes{mountpoint="/data/kafka"}) > 0.85
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka data disk >85% full on {{ $labels.instance }}"
+          description: "{{ $labels.node }} disk at {{ $value | printf \"%.0f\" }}%. Consider increasing retention or adding capacity."
+
+      - alert: BrokerCPUHigh
+        expr: 100 - (avg by (instance, node) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU >80% on {{ $labels.node }}"
+          description: "Sustained high CPU on {{ $labels.node }}: {{ $value | printf \"%.1f\" }}%."
+
+      - alert: HighMemoryUsage
+        expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.node }}"
+          description: "Memory at {{ $value | printf \"%.1f\" }}% on {{ $labels.node }}."
+
+      - alert: NodeDown
+        expr: up{job="node-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Node exporter down on {{ $labels.node }}"
+          description: "{{ $labels.node }} ({{ $labels.role }}) unreachable for >2 minutes."
