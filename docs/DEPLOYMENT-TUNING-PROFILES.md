@@ -27,8 +27,9 @@ The script shows a diff of all changes before applying and asks for confirmation
 
 | Trigger | Action |
 |---------|--------|
-| Deployment complete, snapshot starting | Default — snapshot profile is pre-configured |
-| Connector status changes from `SNAPSHOT` to `STREAMING` | Switch to streaming profile |
+| Fresh deployment | Default — streaming profile is pre-configured |
+| Before initial bulk data load | Switch to snapshot profile |
+| Snapshot completes (connector status `STREAMING`) | Switch back to streaming profile |
 | Adding new tables that need full snapshot | Switch back to snapshot, reconfigure connector |
 
 Check whether snapshot is complete:
@@ -43,13 +44,15 @@ curl -s http://localhost:8083/connectors/debezium-sqlserver-source/status \
 
 | Setting | Snapshot | Streaming |
 |---------|----------|-----------|
-| `DEBEZIUM_SNAPSHOT_MODE` | `initial` | `no_data` |
-| `JDBC_SINK_BATCH_SIZE` | 5000 | 500 |
-| `JDBC_SINK_TASKS_MAX` | 4 | 2 |
-| `CONNECT_PRODUCER_LINGER_MS` | 100 ms | 5 ms |
+| `CONNECT_CONSUMER_FETCH_MIN_BYTES` | 1,048,576 (1 MB) | **1** |
+| `CONNECT_CONSUMER_FETCH_MAX_WAIT_MS` | 500 ms | **10 ms** |
+| `CONNECT_PRODUCER_LINGER_MS` | 100 ms | **5 ms** |
 | `CONNECT_PRODUCER_BATCH_SIZE` | 512 KB | 16 KB |
 | `CONNECT_CONSUMER_MAX_POLL_RECORDS` | 5000 | 500 |
+| `JDBC_SINK_BATCH_SIZE` | 5000 | 500 |
+| `JDBC_SINK_TASKS_MAX` | 4 | 2 |
 | `CONNECT_PRODUCER_COMPRESSION_TYPE` | snappy | lz4 |
+| `DEBEZIUM_SNAPSHOT_MODE` | `initial` | `no_data` |
 
 For full tuning rationale and advanced configuration, see [TUNING-BEST-PRACTICES.md](TUNING-BEST-PRACTICES.md).
 

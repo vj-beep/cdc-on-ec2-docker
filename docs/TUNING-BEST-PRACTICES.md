@@ -6,11 +6,11 @@ Two-phase tuning strategy for the Apache Kafka® Connect-based CDC deployment: *
 
 ### Profiles
 
-The `.env.template` ships with **snapshot** profile pre-configured. After the initial data load completes, switch to **streaming** profile:
+The `.env.template` ships with **streaming** profile pre-configured. For the initial bulk data load, temporarily switch to **snapshot** profile:
 
 ```bash
-./scripts/on-demand-switch-profile.sh streaming   # After snapshot completes (~hours)
-./scripts/on-demand-switch-profile.sh snapshot    # To re-snapshot a table
+./scripts/on-demand-switch-profile.sh snapshot    # Before initial bulk load
+./scripts/on-demand-switch-profile.sh streaming   # Back to default after snapshot completes
 ```
 
 The script updates `.env`, distributes it to all nodes, and restarts services.
@@ -19,8 +19,8 @@ The script updates `.env`, distributes it to all nodes, and restarts services.
 
 | Phase | Duration | Data Volume | Goal | Profile | Trigger |
 |-------|----------|-------------|------|---------|---------|
-| **Snapshot** | Hours | ~1 TB initial | Max throughput, consume full history | `profiles/.env.snapshot` | Right after deployment |
-| **Streaming** | Days/weeks | ~300 GB/day | Low latency, stability | `profiles/.env.streaming` | When connector status shows `RUNNING` (not `TRANSFORMING`) |
+| **Streaming** | Days/weeks | ~300 GB/day | Low latency, stability | `profiles/.env.streaming` | Default — active from deployment |
+| **Snapshot** | Hours | ~1 TB initial | Max throughput, consume full history | `profiles/.env.snapshot` | Switch before initial bulk load |
 
 **Check snapshot progress:**
 ```bash
@@ -152,7 +152,7 @@ This setting is already included in `debezium-sqlserver-source.json` and `debezi
 
 ### 3. Sink Connectors: `consumer.override.fetch.max.wait.ms=10`
 
-Without this override, the sink connector consumer waits up to `CONNECT_CONSUMER_FETCH_MAX_WAIT_MS` (100ms) before each poll even when data is available. Add to both JDBC sink connectors:
+Without this override, the sink connector consumer waits up to `CONNECT_CONSUMER_FETCH_MAX_WAIT_MS` (10ms) before each poll even when data is available. Add to both JDBC sink connectors:
 
 ```json
 "consumer.override.fetch.max.wait.ms": "10",
@@ -194,7 +194,7 @@ Aurora → SQL Server path (~75ms total):
   Total                       ~42ms   (practical: ~50–100ms)
 
 SQL Server → Aurora path — RDS SQL Server (POC):
-  CDC agent scan interval     ~300-700ms ← RDS SQL Agent scheduling floor
+  CDC agent scan interval     ~700-1200ms ← RDS SQL Agent scheduling floor (observed avg ~1000ms)
   Debezium poll               ~50ms      ← poll.interval.ms=50
   Kafka producer (linger=0)   ~1ms
   Kafka replication (RF=3)    ~30ms
@@ -394,7 +394,7 @@ CONNECT_CONSUMER_FETCH_MAX_BYTES=52428800
   "snapshot.mode": "no_data",
   "max.batch.size": 2048,
   "max.queue.size": 8192,
-  "poll.interval.ms": 500,
+  "poll.interval.ms": 50,
   "producer.override.compression.type": "lz4",
   "producer.override.batch.size": "16384",
   "producer.override.linger.ms": "5"
@@ -514,7 +514,8 @@ NVMe drives have their own internal queue management; OS-level schedulers add ov
 
 | Trigger | Action |
 |---------|--------|
-| Starting initial snapshot | `./scripts/on-demand-switch-profile.sh snapshot` |
+| Fresh deployment | Streaming by default — no action needed |
+| Before initial bulk load | `./scripts/on-demand-switch-profile.sh snapshot` |
 | Snapshot completes (connector status shows `STREAMING`) | `./scripts/on-demand-switch-profile.sh streaming` |
 | Need to re-snapshot a table | `./scripts/on-demand-switch-profile.sh snapshot`, reconfigure connector with `snapshot.mode=initial` |
 | Performance degradation during streaming | Check metrics, consider temporary snapshot profile |
