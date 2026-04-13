@@ -374,21 +374,6 @@ services:
       - /var/lib/node_exporter/textfile_collector:/textfile:ro
 
   # ===========================================================
-  # Profile Exporter — writes cdc_tuning_mode metric for node-exporter textfile collector
-  # Reads .env every 15s; metric value: 1=streaming, 0=snapshot
-  # Only active on Node 5 (monitor); harmless no-op on other nodes (no .env mounted)
-  # ===========================================================
-  profile-exporter:
-    image: alpine:3.20
-    network_mode: host
-    restart: unless-stopped
-    volumes:
-      - ${DEPLOY_DIR}/.env:/app/.env:ro
-      - ${DEPLOY_DIR}/monitoring/profile-exporter.sh:/app/profile-exporter.sh:ro
-      - /var/lib/node_exporter/textfile_collector:/textfile
-    command: sh /app/profile-exporter.sh
-
-  # ===========================================================
   # cAdvisor (all nodes — port 9080 to avoid Grafana 8080 conflict)
   # ===========================================================
   cadvisor:

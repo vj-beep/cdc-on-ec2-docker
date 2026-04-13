@@ -200,7 +200,7 @@ case $NODE in
 
     docker compose -f docker-compose.yml -f docker-compose.ksqldb-monitoring.yml \
       up -d control-center ksqldb-server rest-proxy flink-jobmanager flink-taskmanager \
-      prometheus grafana alertmanager node-exporter cadvisor profile-exporter
+      prometheus grafana alertmanager node-exporter cadvisor
     echo "✅ Monitoring stack started"
     echo ""
     echo "Access points:"

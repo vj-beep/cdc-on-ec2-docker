@@ -112,6 +112,18 @@ echo -e "${BOLD}${BLUE}║     CDC deployment — Confluent Platform Node Status
 echo -e "${BOLD}${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
+# Display active tuning profile from .env
+echo -e "${BOLD}${BLUE}─ Tuning Profile${NC}"
+FETCH_MIN="${CONNECT_CONSUMER_FETCH_MIN_BYTES:-}"
+if [ -z "$FETCH_MIN" ]; then
+  echo -e "  ${GREY}● Unknown${NC} (CONNECT_CONSUMER_FETCH_MIN_BYTES not in .env)"
+elif [ "$FETCH_MIN" = "1" ]; then
+  echo -e "  ${GREEN}● Streaming${NC} (low-latency CDC)"
+else
+  echo -e "  ${YELLOW}● Snapshot${NC} (high-throughput bulk load)"
+fi
+echo ""
+
 # Function to get service status via SSM
 get_node_status() {
   local node_name="$1"
