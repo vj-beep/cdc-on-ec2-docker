@@ -11,7 +11,7 @@ Two pre-built tuning profiles ship with this repo, optimized for different phase
 
 ## Switching Profiles
 
-Use the helper script — it merges the selected profile into your local `.env`, distributes it to all nodes via SSM, and restarts services in order:
+Use the helper script — it merges the selected profile into your local `.env`, distributes it to all nodes via SSM, and restarts all services:
 
 ```bash
 # Switch to streaming (after initial snapshot finishes)
@@ -22,6 +22,12 @@ Use the helper script — it merges the selected profile into your local `.env`,
 ```
 
 The script shows a diff of all changes before applying and asks for confirmation.
+
+> **After every profile switch, redeploy connectors:**
+> ```bash
+> ./scripts/6-deploy-connectors.sh
+> ```
+> Connector tuning values (`max.batch.size`, `max.queue.size`, `batch.size`, `poll.interval.ms`) are applied at deploy time via `.env` substitution — restarting the Connect worker alone does not update them. The script reminds you of this after each switch.
 
 ## When to Switch
 

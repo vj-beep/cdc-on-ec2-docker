@@ -228,6 +228,11 @@ if [[ "${CONFIRM}" =~ ^[Yy]$ ]]; then
         error "Failed to restart: ${RESTART_FAILED[*]}"
         echo "  Troubleshoot: aws ssm start-session --target <instance-id>"
     fi
+
+    echo ""
+    warn "Connector configs are set at deploy time — worker restart alone is not enough."
+    warn "Redeploy connectors now to apply new batch/queue sizes to running connectors:"
+    echo "  ./scripts/6-deploy-connectors.sh"
 else
     echo ""
     info "Skipped. To apply manually:"
@@ -238,4 +243,6 @@ else
     echo "     ./scripts/5-start-node.sh broker3"
     echo "     ./scripts/5-start-node.sh connect"
     echo "     ./scripts/5-start-node.sh monitor"
+    echo "  3. Redeploy connectors to apply new batch/queue sizes:"
+    echo "     ./scripts/6-deploy-connectors.sh"
 fi
