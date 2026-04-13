@@ -6,8 +6,14 @@
 # may not be mounted.
 #
 # Metric: cdc_tuning_mode
-#   1 = streaming (schema_only or no_data snapshot mode)
-#   0 = snapshot  (initial snapshot mode)
+#   1 = streaming (CONNECT_CONSUMER_FETCH_MIN_BYTES=1)
+#   0 = snapshot  (CONNECT_CONSUMER_FETCH_MIN_BYTES=anything else, e.g. 1048576)
+#
+# Uses CONNECT_CONSUMER_FETCH_MIN_BYTES as the tuning indicator because it is
+# the single most impactful latency setting: snapshot profile holds fetches
+# until 1 MB accumulates (~500 ms wait); streaming profile returns immediately
+# on 1 byte. DEBEZIUM_SNAPSHOT_MODE is intentionally ignored — it stays
+# "initial" for fresh deployments even when all tuning values are streaming.
 #
 # Output file is picked up by node-exporter's textfile collector
 # (mounted at /textfile inside this container).
@@ -17,13 +23,13 @@ ENV_FILE=/app/.env
 
 while true; do
     if [ -f "$ENV_FILE" ]; then
-        mode=$(grep -E '^DEBEZIUM_SNAPSHOT_MODE=' "$ENV_FILE" \
-               | cut -d= -f2 \
-               | tr -d "'" \
-               | tr -d '"' \
-               | tr -d ' ')
-        case "$mode" in
-            schema_only|no_data|never)
+        fetch_min=$(grep -E '^CONNECT_CONSUMER_FETCH_MIN_BYTES=' "$ENV_FILE" \
+                    | cut -d= -f2 \
+                    | tr -d "'" \
+                    | tr -d '"' \
+                    | tr -d ' ')
+        case "$fetch_min" in
+            1)
                 value=1
                 label="streaming"
                 ;;
