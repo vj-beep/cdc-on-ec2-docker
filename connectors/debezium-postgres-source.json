@@ -26,6 +26,10 @@
 
     "snapshot.mode": "${DEBEZIUM_SNAPSHOT_MODE}",
 
+    "poll.interval.ms": "${DEBEZIUM_POLL_INTERVAL_MS}",
+    "max.batch.size": "${DEBEZIUM_MAX_BATCH_SIZE}",
+    "max.queue.size": "${DEBEZIUM_MAX_QUEUE_SIZE}",
+
     "key.converter": "io.confluent.connect.avro.AvroConverter",
     "key.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
     "value.converter": "io.confluent.connect.avro.AvroConverter",
