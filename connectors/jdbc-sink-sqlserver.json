@@ -2,7 +2,8 @@
   "name": "jdbc-sink-sqlserver",
   "config": {
     "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
-    "tasks.max": "1",
+    "tasks.max": "${JDBC_SINK_TASKS_MAX}",
+    "batch.size": "${JDBC_SINK_BATCH_SIZE}",
 
     "connection.url": "jdbc:sqlserver://${SQLSERVER_HOST}:${SQLSERVER_PORT};databaseName=${SQLSERVER_DATABASE};encrypt=false",
     "connection.username": "${SQLSERVER_USER}",
