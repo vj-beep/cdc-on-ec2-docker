@@ -23,16 +23,18 @@
     "topic.creation.default.cleanup.policy": "delete",
     "topic.creation.default.retention.ms": "${KAFKA_TOPIC_RETENTION_MS}",
 
-    "snapshot.mode": "${DEBEZIUM_SNAPSHOT_MODE}",
+    "snapshot.mode": "${SQLSERVER_SOURCE_SNAPSHOT_MODE}",
+    "snapshot.fetch.size": "${SQLSERVER_SOURCE_SNAPSHOT_FETCH_SIZE}",
 
     "key.converter": "io.confluent.connect.avro.AvroConverter",
     "key.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
     "value.converter": "io.confluent.connect.avro.AvroConverter",
     "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
 
-    "poll.interval.ms": "${DEBEZIUM_POLL_INTERVAL_MS}",
-    "max.batch.size": "${DEBEZIUM_MAX_BATCH_SIZE}",
-    "max.queue.size": "${DEBEZIUM_MAX_QUEUE_SIZE}",
+    "poll.interval.ms": "${SQLSERVER_SOURCE_POLL_INTERVAL_MS}",
+    "max.batch.size": "${SQLSERVER_SOURCE_MAX_BATCH_SIZE}",
+    "max.queue.size": "${SQLSERVER_SOURCE_MAX_QUEUE_SIZE}",
+    "max.queue.size.in.bytes": "${SQLSERVER_SOURCE_MAX_QUEUE_SIZE_IN_BYTES}",
 
     "producer.override.linger.ms": "0",
 

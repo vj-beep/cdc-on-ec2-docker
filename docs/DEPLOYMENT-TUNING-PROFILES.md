@@ -27,7 +27,7 @@ The script shows a diff of all changes before applying and asks for confirmation
 > ```bash
 > ./scripts/6-deploy-connectors.sh
 > ```
-> Connector tuning values (`max.batch.size`, `max.queue.size`, `batch.size`, `poll.interval.ms`) are applied at deploy time via `.env` substitution — restarting the Connect worker alone does not update them. The script reminds you of this after each switch.
+> Connector tuning values (`max.batch.size`, `max.queue.size`, `batch.size`, `poll.interval.ms`, etc.) are applied at deploy time via `.env` substitution — restarting the Connect worker alone does not update them. The script reminds you of this after each switch.
 
 ## When to Switch
 
@@ -48,20 +48,43 @@ curl -s http://localhost:8083/connectors/debezium-sqlserver-source/status \
 
 ## Key Differences
 
+### Connect Worker Settings
+
 | Setting | Snapshot | Streaming |
 |---------|----------|-----------|
+| `CONNECT_OFFSET_FLUSH_INTERVAL_MS` | 60,000 (60s) | **1,000 (1s)** |
 | `CONNECT_CONSUMER_FETCH_MIN_BYTES` | 1,048,576 (1 MB) | **1** |
 | `CONNECT_CONSUMER_FETCH_MAX_WAIT_MS` | 500 ms | **10 ms** |
 | `CONNECT_PRODUCER_LINGER_MS` | 100 ms | **5 ms** |
-| `CONNECT_PRODUCER_BATCH_SIZE` | 512 KB | 16 KB |
+| `CONNECT_PRODUCER_BATCH_SIZE` | 512 KB | 32 KB |
 | `CONNECT_CONSUMER_MAX_POLL_RECORDS` | 5000 | 500 |
-| `JDBC_SINK_BATCH_SIZE` | 5000 | 500 |
+| `CONNECT_PRODUCER_COMPRESSION_TYPE` | snappy | lz4 |
+
+### SQL Server Source Connector
+
+| Setting | Snapshot | Streaming |
+|---------|----------|-----------|
+| `SQLSERVER_SOURCE_SNAPSHOT_MODE` | `initial` | `no_data` |
+| `SQLSERVER_SOURCE_MAX_BATCH_SIZE` | 4096 | 256 |
+| `SQLSERVER_SOURCE_POLL_INTERVAL_MS` | 100 | 50 |
+| `CDC_CAPTURE_MAXTRANS` | 10000 | 50 |
+
+### Aurora PG Source Connector
+
+| Setting | Snapshot | Streaming |
+|---------|----------|-----------|
+| `AURORA_SOURCE_SNAPSHOT_MODE` | `initial` | `no_data` |
+| `AURORA_SOURCE_MAX_BATCH_SIZE` | 4096 | 256 |
+| `AURORA_SOURCE_POLL_INTERVAL_MS` | 100 | 50 |
+
+### JDBC Sink Connectors
+
+| Setting | Snapshot | Streaming |
+|---------|----------|-----------|
+| `JDBC_SINK_AURORA_BATCH_SIZE` | 5000 | 500 |
+| `JDBC_SINK_SQLSERVER_BATCH_SIZE` | 5000 | 500 |
 | `JDBC_SINK_AURORA_TASKS_MAX` | 4 | 2 |
 | `JDBC_SINK_SQLSERVER_TASKS_MAX` | 1 | 1 |
-| `CONNECT_PRODUCER_COMPRESSION_TYPE` | snappy | lz4 |
-| `DEBEZIUM_SNAPSHOT_MODE` | `initial` | `no_data` |
-| `DEBEZIUM_MAX_BATCH_SIZE` | 4096 | 256 |
-| `CDC_CAPTURE_MAXTRANS` | 10000 | 50 |
 
 For full tuning rationale and advanced configuration, see [TUNING-BEST-PRACTICES.md](TUNING-BEST-PRACTICES.md).
 
