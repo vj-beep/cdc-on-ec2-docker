@@ -19,9 +19,9 @@
     "schema.history.internal.kafka.topic.replication.factor": "${KAFKA_REPLICATION_FACTOR}",
 
     "topic.creation.default.replication.factor": "${KAFKA_REPLICATION_FACTOR}",
-    "topic.creation.default.partitions": "3",
+    "topic.creation.default.partitions": "${KAFKA_DEFAULT_PARTITIONS}",
     "topic.creation.default.cleanup.policy": "delete",
-    "topic.creation.default.retention.ms": "259200000",
+    "topic.creation.default.retention.ms": "${KAFKA_TOPIC_RETENTION_MS}",
 
     "snapshot.mode": "${DEBEZIUM_SNAPSHOT_MODE}",
 
