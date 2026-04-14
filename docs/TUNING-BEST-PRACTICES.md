@@ -230,7 +230,7 @@ With `sysadmin` access you can modify the SQL Agent job step directly, which con
 EXEC msdb.dbo.sp_update_jobstep
   @job_name = N'cdc.<dbname>_capture',
   @step_id  = 1,
-  @command  = N'/async 1 /maxscans 100 /pollinginterval 0 /maxtrans 5000';
+  @command  = N'/async 1 /maxscans 100 /pollinginterval 0 /maxtrans 50';
 
 EXEC msdb.dbo.sp_stop_job  N'cdc.<dbname>_capture';
 EXEC msdb.dbo.sp_start_job N'cdc.<dbname>_capture';

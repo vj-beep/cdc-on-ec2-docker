@@ -93,13 +93,18 @@ GO
 --    Use 1 for dev/cost savings; 0 for production sub-second CDC.
 -------------------------------------------------------------------------------
 
+-- Defaults (overridable via sqlcmd -v CDC_CAPTURE_MAXTRANS=50)
+:setvar CDC_CAPTURE_MAXTRANS  "50"
+:setvar CDC_CAPTURE_MAXSCANS  "100"
+:setvar CDC_CAPTURE_POLLING   "0"
+
 EXEC sys.sp_cdc_change_job
     @job_type = 'capture',
-    @pollinginterval = 0,
-    @maxtrans      = 5000,
-    @maxscans      = 100;
+    @pollinginterval = $(CDC_CAPTURE_POLLING),   -- 0 = continuous
+    @maxtrans        = $(CDC_CAPTURE_MAXTRANS),  -- lower = lower latency, higher = higher throughput
+    @maxscans        = $(CDC_CAPTURE_MAXSCANS);  -- scan cycles per run
 
-PRINT 'CDC capture polling interval set to 0 (continuous)';
+PRINT 'CDC capture: maxtrans=$(CDC_CAPTURE_MAXTRANS), maxscans=$(CDC_CAPTURE_MAXSCANS), polling=$(CDC_CAPTURE_POLLING)';
 GO
 
 -------------------------------------------------------------------------------

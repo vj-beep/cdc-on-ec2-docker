@@ -60,6 +60,8 @@ curl -s http://localhost:8083/connectors/debezium-sqlserver-source/status \
 | `JDBC_SINK_SQLSERVER_TASKS_MAX` | 1 | 1 |
 | `CONNECT_PRODUCER_COMPRESSION_TYPE` | snappy | lz4 |
 | `DEBEZIUM_SNAPSHOT_MODE` | `initial` | `no_data` |
+| `DEBEZIUM_MAX_BATCH_SIZE` | 4096 | 256 |
+| `CDC_CAPTURE_MAXTRANS` | 10000 | 50 |
 
 For full tuning rationale and advanced configuration, see [TUNING-BEST-PRACTICES.md](TUNING-BEST-PRACTICES.md).
 
