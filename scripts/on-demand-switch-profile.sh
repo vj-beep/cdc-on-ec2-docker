@@ -7,7 +7,7 @@
 #
 # Usage:
 #   ./scripts/on-demand-switch-profile.sh snapshot    # Optimize for initial data load
-#   ./scripts/on-demand-switch-profile.sh streaming   # Optimize for steady-state CDC
+#   ./scripts/on-demand-switch-profile.sh streaming   # Optimize for steady-state CDC (sub-second capable)
 #
 # =============================================================================
 
@@ -33,7 +33,7 @@ if [[ $# -ne 1 ]] || [[ "$1" != "snapshot" && "$1" != "streaming" ]]; then
     echo "Usage: $0 {snapshot|streaming}"
     echo ""
     echo "  snapshot   - Optimize for initial data load / bulk snapshot"
-    echo "  streaming  - Optimize for steady-state CDC (low latency)"
+    echo "  streaming  - Optimize for steady-state CDC (sub-second capable)"
     exit 1
 fi
 
