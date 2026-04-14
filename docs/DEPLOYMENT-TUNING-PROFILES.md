@@ -56,7 +56,8 @@ curl -s http://localhost:8083/connectors/debezium-sqlserver-source/status \
 | `CONNECT_PRODUCER_BATCH_SIZE` | 512 KB | 16 KB |
 | `CONNECT_CONSUMER_MAX_POLL_RECORDS` | 5000 | 500 |
 | `JDBC_SINK_BATCH_SIZE` | 5000 | 500 |
-| `JDBC_SINK_TASKS_MAX` | 4 | 2 |
+| `JDBC_SINK_AURORA_TASKS_MAX` | 4 | 2 |
+| `JDBC_SINK_SQLSERVER_TASKS_MAX` | 1 | 1 |
 | `CONNECT_PRODUCER_COMPRESSION_TYPE` | snappy | lz4 |
 | `DEBEZIUM_SNAPSHOT_MODE` | `initial` | `no_data` |
 

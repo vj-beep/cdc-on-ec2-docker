@@ -2,7 +2,7 @@
   "name": "jdbc-sink-aurora",
   "config": {
     "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
-    "tasks.max": "${JDBC_SINK_TASKS_MAX}",
+    "tasks.max": "${JDBC_SINK_AURORA_TASKS_MAX}",
     "batch.size": "${JDBC_SINK_BATCH_SIZE}",
 
     "connection.url": "jdbc:postgresql://${AURORA_HOST}:${AURORA_PORT}/${AURORA_DATABASE}",
