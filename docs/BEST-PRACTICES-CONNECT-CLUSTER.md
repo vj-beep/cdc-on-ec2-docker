@@ -109,3 +109,78 @@ DR pattern:
 - only one active at a time
 
 Failover requires operational procedures and explicit connector lifecycle management.
+
+---
+
+## Appendix: Connector-to-Worker-to-Task Hierarchy
+
+```mermaid
+graph TD
+    KB["Kafka Broker Cluster<br/>(internal topics: connect-configs, connect-offsets, connect-status)"]
+    
+    CC["Connect Cluster<br/>(distributed mode)"]
+    
+    W1["Worker 1<br/>(resilience + capacity unit)"]
+    W2["Worker 2"]
+    W3["Worker 3"]
+    
+    SRC1["Source Connector A: CRM<br/>(one logical CDC pipeline)"]
+    SRC2["Source Connector B: Billing<br/>(one logical CDC pipeline)"]
+    SINK1["Sink Connector: Aurora<br/>(one logical write pipeline)"]
+    
+    T1["Task 0<br/>(tables: crm.customers, crm.orders)"]
+    T2["Task 1<br/>(tables: crm.products)"]
+    
+    T3["Task 0<br/>(tables: billing.invoices, billing.payments)"]
+    
+    T4["Task 0<br/>(consume from Kafka, write to Aurora)"]
+    
+    CRM["CRM Database"]
+    BIL["Billing Database"]
+    
+    TOPICS["Kafka Topics<br/>(crm.*, billing.*)"]
+    
+    AURORA["Aurora PostgreSQL"]
+    
+    KB --> CC
+    
+    CC --> W1
+    CC --> W2
+    CC --> W3
+    
+    SRC1 --> W1
+    SRC1 --> T1
+    SRC1 --> T2
+    
+    SRC2 --> W2
+    SRC2 --> T3
+    
+    SINK1 --> W3
+    SINK1 --> T4
+    
+    CRM --> SRC1
+    BIL --> SRC2
+    
+    T1 --> TOPICS
+    T2 --> TOPICS
+    T3 --> TOPICS
+    
+    TOPICS --> T4
+    T4 --> AURORA
+    
+    style CC fill:#0277bd,stroke:#01579b,stroke-width:2px,color:#fff
+    style KB fill:#6a1b9a,stroke:#4a0080,stroke-width:2px,color:#fff
+    style W1 fill:#fbc02d,stroke:#f57f17,stroke-width:2px,color:#000
+    style W2 fill:#fbc02d,stroke:#f57f17,stroke-width:2px,color:#000
+    style W3 fill:#fbc02d,stroke:#f57f17,stroke-width:2px,color:#000
+    style SRC1 fill:#388e3c,stroke:#1b5e20,stroke-width:2px,color:#fff
+    style SRC2 fill:#388e3c,stroke:#1b5e20,stroke-width:2px,color:#fff
+    style SINK1 fill:#d84315,stroke:#bf360c,stroke-width:2px,color:#fff
+```
+
+**Key insights:**
+- **Workers** are the resilience and capacity unit; add workers when CPU/memory/network is constrained
+- **Connectors** are the scaling and isolation unit; use multiple connectors per database/domain boundary
+- **Tasks** are parallelism within a connector; add tasks only when connector and source system support real parallelism (e.g., multiple tables, partitions)
+- One worker failure triggers task rebalance across surviving workers
+- All workers coordinate via shared Kafka state (internal topics)
