@@ -233,6 +233,54 @@ CREATE PUBLICATION cdc_publication FOR TABLE your_table1, your_table2;
 -- Add all tables you want to replicate
 ```
 
+### 3a. Understand CDC Scope — Schema Migration Is a Separate Workstream
+
+**Critical:** Debezium captures **row-level data changes only**. It does NOT perform target schema migration or manage:
+
+- Indexes (primary, unique, secondary)
+- Foreign keys and referential integrity constraints
+- Views, stored procedures, triggers, or other DDL objects
+- Physical schema design choices (partitioning, compression, encoding, etc.)
+
+**Why this matters:** Treating CDC as a full schema migration framework creates risk:
+- Unnecessary write overhead during initial load from creating all source indexes upfront
+- Schema design misalignment (source indexes don't necessarily suit target workload)
+- Maintenance burden of managing indexes via connectors vs. DBA-reviewed DDL
+
+**Confluent & Kafka best practice:** Separate data movement from schema migration:
+- **Use Debezium + Kafka** for reliable, continuous data movement (initial snapshot + streaming changes)
+- **Use migration tooling or DBA-managed DDL** for target schema creation and optimization
+
+**Recommended operating model:**
+
+1. **Pre-create essential target schema** before running Phase 5 (Start Brokers):
+   - Primary keys on all tables
+   - Unique constraints for CDC deduplication
+   - Only essential indexes (required for query performance)
+   - Data types, nullability, defaults
+
+2. **Run initial snapshot** (Phase 6-7: Deploy & validate connectors) — Debezium captures row data
+
+3. **Validate data consistency** — Confirm all rows migrated and changes flowing
+
+4. **Add secondary indexes and optimization** after data validation completes
+   - Prevents write overhead during initial load
+   - Allows tuning based on actual target workload query patterns
+   - Time-bound so you can measure impact
+
+5. **Add foreign keys and triggers** as final step (after validation)
+   - Post-migration constraint validation is easier than maintaining them during load
+   - Prevents connector from reapplying constraint violations
+
+**Why sink connectors cannot manage this:** The JDBC Sink connector (which writes Kafka records to PostgreSQL/SQL Server) is designed for **efficient bulk upsert**, not full schema management. It can auto-create basic tables but should not be relied on for:
+- Creating indexes during active writes
+- Managing referential integrity mid-migration
+- Tuning physical design
+
+**Bottom line:** Confluent and Kafka are the **transport layer** for CDC data movement, not the mechanism for migrating schema. Debezium + JDBC sink handle data reliably; database migration tooling and DBA expertise handle schema design.
+
+👉 **For detailed guidance:** See [docs/architecture/schema-migration-model.md](docs/architecture/schema-migration-model.md) — includes implementation checklist, risk analysis, Confluent best practices, and monitoring queries.
+
 ### 4. Verify Prerequisites Are Ready
 
 Before running Phase 0, check:
@@ -303,12 +351,13 @@ See [docs/operations/troubleshooting.md](docs/operations/troubleshooting.md) for
 
 - **[README-DEPLOYMENT.md](README-DEPLOYMENT.md)** ← Start here! Complete step-by-step workflow
 - **[docs/README.md](docs/README.md)** — Documentation index and TOC
+- **[docs/architecture/schema-migration-model.md](docs/architecture/schema-migration-model.md)** — CDC scope, schema migration strategy, and implementation checklist (Confluent & Kafka best practices)
+- **[docs/architecture/topology.md](docs/architecture/topology.md)** — Node roles and service layout
 - **[docs/operations/troubleshooting.md](docs/operations/troubleshooting.md)** — Deep troubleshooting guide
 - **[docs/operations/dlq.md](docs/operations/dlq.md)** — Dead Letter Queue operations and replay
+- **[docs/operations/startup.md](docs/operations/startup.md)** — Expected startup durations per service
 - **[docs/performance/best-practices.md](docs/performance/best-practices.md)** — Performance tuning for snapshot and streaming
 - **[docs/performance/profiles.md](docs/performance/profiles.md)** — Snapshot vs. streaming profile switching
-- **[docs/architecture/topology.md](docs/architecture/topology.md)** — Node roles and service layout
-- **[docs/operations/startup.md](docs/operations/startup.md)** — Expected startup durations per service
 - **[docs/reference/cheat-sheet.md](docs/reference/cheat-sheet.md)** — Common commands at a glance
 
 ---
