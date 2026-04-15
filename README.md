@@ -73,7 +73,8 @@ graph TB
     style PGDB fill:#E3F2FD,stroke:#1565C0,stroke-width:2px,color:#333
 ```
 
-### Infrastructure Requirements
+<details>
+<summary><strong>Infrastructure Requirements</strong></summary>
 
 | Role | vCPU | RAM | Storage | Purpose |
 |------|------|-----|---------|---------|
@@ -87,6 +88,8 @@ graph TB
 - Monitor: m5d.2xlarge (8 vCPU, 32 GB RAM, 1×300 GB NVMe) or equivalent
 
 **On-premises:** Allocate comparable resources. NVMe or local SSD strongly recommended for brokers.
+
+</details>
 
 ### Bi-directional CDC
 
