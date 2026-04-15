@@ -1,19 +1,20 @@
 # DLQ Operations
 
-Dead Letter Queue (DLQ) configuration, monitoring, and troubleshooting for CDC sink connectors.
+Dead Letter Queue (DLQ) design and operations for Kafka Connect sink connectors.
 
-## Why DLQs Are Required
+## Summary
 
-Apache Kafka® Connect sink connectors encounter bad records: type mismatches, null primary keys, schema incompatibilities, constraint violations. Without a DLQ, a single bad record can:
+Kafka Connect supports a single static DLQ topic per sink connector, so DLQ design is really a connector design question rather than a per-record routing question.
 
-- **Fail the task** (`errors.tolerance=none`, the default), stopping all replication.
-- **Silently drop records** (`errors.tolerance=all` without DLQ), losing data with no visibility.
+The best practice is to start with one DLQ per sink connector and group sink connectors by database, domain, or application boundary. This keeps the design operationally simple and avoids creating an unmanageable number of DLQ topics in large CDC environments.
 
-DLQs provide a third option: **route bad records to a separate topic** for inspection and replay, while the connector continues processing good records.
+If stronger isolation is needed, split connectors only when there is a clear reason such as separate ownership, different SLA, compliance requirements, or the need for isolated replay. A per-topic DLQ is usually an exception for high-value or high-risk flows, not the default design.
 
-Every sink connector in this deployment must have a DLQ configured.
+It is also important to note that Kafka Connect provides DLQ support for sink connectors only. There is no native Kafka Connect DLQ for source connectors.
 
-## DLQ Topic Naming Convention
+## Best-Practice Policies
+
+### Use one DLQ per sink connector as the default pattern
 
 Each sink connector gets its own DLQ topic:
 
@@ -24,14 +25,27 @@ Each sink connector gets its own DLQ topic:
 
 Never share a DLQ topic between connectors. Separate topics allow independent monitoring, alerting, and replay per pipeline path.
 
-## DLQ Configuration
+### Group sink connectors by database, domain, or application boundary
 
-Add these properties to every sink connector JSON:
+For large deployments with many connectors, organize by logical unit (e.g., all finance-domain sinks share monitoring, all customer-domain sinks share monitoring) to keep the design operationally simple.
+
+### Avoid one connector per table unless there is a strong operational reason
+
+Start with one sink connector per database boundary (e.g., one Aurora sink, one SQL Server sink). Split only when isolation is critical.
+
+### Split connectors only for:
+
+- **Isolated replay needs** — some data requires fast retry, others can wait
+- **Separate team ownership** — different teams own different pipelines
+- **Different SLA or compliance boundaries** — some tables have stricter requirements
+- **Noisy failure domains that need isolation** — one table with frequent violations shouldn't block others
+
+### Enable DLQ with:
 
 ```json
 {
   "errors.tolerance": "all",
-  "errors.deadletterqueue.topic.name": "dlq-jdbc-sink-aurora",
+  "errors.deadletterqueue.topic.name": "dlq-<connector-name>",
   "errors.deadletterqueue.topic.replication.factor": "3",
   "errors.deadletterqueue.context.headers.enable": "true",
   "errors.log.enable": "true",
@@ -48,70 +62,37 @@ Add these properties to every sink connector JSON:
 | `errors.log.enable` | `true` | Log errors to Connect worker log |
 | `errors.log.include.messages` | `true` | Include the failing record in the log |
 
-## Inspecting DLQ Messages
+### Add monitoring, alerting, and logging so DLQ activity is visible
 
-### List DLQ Topics
+Treat the DLQ as an operational triage and remediation stream. Set up Grafana panels and Prometheus alerts to catch DLQ growth early.
 
-```bash
-kafka-topics --bootstrap-server ${BROKER_1_IP}:9092 --list | grep dlq
-```
+### Treat the DLQ as an operational triage and remediation stream, not a silent discard path
 
-### Count Messages in DLQ
+Every DLQ record is a signal that something went wrong. Investigate, fix the root cause, and replay only when appropriate.
 
-```bash
-kafka-run-class kafka.tools.GetOffsetShell \
-  --broker-list ${BROKER_1_IP}:9092 \
-  --topic dlq-jdbc-sink-aurora
-```
+### Keep replay controlled and explicit
 
-### Read DLQ Messages with kcat
+Do not automatically replay DLQ messages. Replay is a deliberate operational decision that should require explicit approval and validation.
 
-```bash
-# Read all DLQ messages from the beginning
-kcat -C -b ${BROKER_1_IP}:9092 -t dlq-jdbc-sink-aurora -o beginning -e
+## Short FAQ
 
-# Read with headers (shows error context)
-kcat -C -b ${BROKER_1_IP}:9092 -t dlq-jdbc-sink-aurora -o beginning -e \
-  -f 'Headers: %h\nKey: %k\nValue: %s\nPartition: %p Offset: %o\n---\n'
+**Q: Does Kafka Connect support DLQ?**
+Yes, for sink connectors. A sink connector can write failed records to a single configured DLQ topic.
 
-# Read last 10 messages
-kcat -C -b ${BROKER_1_IP}:9092 -t dlq-jdbc-sink-aurora -o -10 -e
-```
+**Q: Is there a native DLQ for source connectors?**
+No. Kafka Connect does not provide a native DLQ for source connectors.
 
-### Read with kafka-console-consumer
+**Q: How should customers design DLQ at scale?**
+Start with one DLQ per sink connector and group connectors by database, domain, or application boundary.
 
-```bash
-kafka-console-consumer \
-  --bootstrap-server ${BROKER_1_IP}:9092 \
-  --topic dlq-jdbc-sink-aurora \
-  --from-beginning \
-  --property print.headers=true \
-  --property print.key=true \
-  --property print.timestamp=true
-```
+**Q: When should a connector be split?**
+Only when you need isolated replay, separate ownership, different SLA, or compliance isolation.
 
-## Error Headers
+**Q: Is there a built-in DLQ replay feature?**
+Not as a one-click Kafka Connect feature. Since the DLQ is just a Kafka topic, replay is usually implemented with a second connector, a custom remediation flow, or a controlled republish/reprocess process.
 
-When `errors.deadletterqueue.context.headers.enable=true`, each DLQ record carries these headers:
-
-| Header | Description |
-|--------|-------------|
-| `__connect.errors.topic` | Original source topic of the failed record |
-| `__connect.errors.partition` | Original partition |
-| `__connect.errors.offset` | Original offset in the source topic |
-| `__connect.errors.connector.name` | Name of the connector that failed |
-| `__connect.errors.task.id` | Task ID that encountered the error |
-| `__connect.errors.stage` | Processing stage where failure occurred (e.g., `VALUE_CONVERTER`, `SINK`) |
-| `__connect.errors.class.name` | Exception class name |
-| `__connect.errors.exception.message` | Exception message text |
-| `__connect.errors.exception.stacktrace` | Full stack trace |
-| `__connect.errors.timestamp` | When the error occurred |
-
-The `stage` header is particularly useful:
-- `VALUE_CONVERTER`: Deserialization failure (schema mismatch, corrupt data)
-- `SINK`: The sink connector itself failed (DB constraint violation, connection error)
-- `KEY_CONVERTER`: Key deserialization failure
-- `HEADER_CONVERTER`: Header deserialization failure
+**Q: What should operators do with DLQ records?**
+Use headers, logs, and monitoring to inspect failures, fix the root cause, and replay only when appropriate.
 
 ## Common DLQ Scenarios
 
@@ -289,6 +270,101 @@ Add a panel to the Connect CDC dashboard:
 - **Threshold:** Green < 0, Yellow > 0, Red > 10 MB
 
 A healthy system has zero DLQ messages. Any DLQ activity warrants investigation.
+
+## Appendix: Sample DLQ Setup
+
+```mermaid
+flowchart LR
+    subgraph SOURCES["Source Databases"]
+        DB1["CRM DB"]
+        DB2["Billing DB"]
+        DB3["ERP DB"]
+        DB4["High-Criticality Table Set"]
+    end
+
+    subgraph CDC["Debezium Source Connectors"]
+        SRC1["Debezium Source Connector(s)\n(no native Connect DLQ on source connectors)"]
+    end
+
+    subgraph TOPICS["Kafka CDC Topics"]
+        T1["crm.* topics"]
+        T2["billing.* topics"]
+        T3["erp.* topics"]
+        T4["critical_table topic(s)"]
+    end
+
+    subgraph SINKS["Kafka Connect Sink Connector Decomposition"]
+        C1["jdbc-sink-aurora-crm\nerrors.tolerance=all\nerrors.deadletterqueue.topic.name=dlq.jdbc-sink-aurora.crm"]
+        C2["jdbc-sink-aurora-billing\nerrors.tolerance=all\nerrors.deadletterqueue.topic.name=dlq.jdbc-sink-aurora.billing"]
+        C3["jdbc-sink-aurora-erp\nerrors.tolerance=all\nerrors.deadletterqueue.topic.name=dlq.jdbc-sink-aurora.erp"]
+        C4["jdbc-sink-aurora-critical\nerrors.tolerance=all\nerrors.deadletterqueue.topic.name=dlq.jdbc-sink-aurora.critical"]
+    end
+
+    subgraph DLQ["Static DLQ Topics"]
+        D1["dlq.jdbc-sink-aurora.crm\nfailed records + context headers"]
+        D2["dlq.jdbc-sink-aurora.billing\nfailed records + context headers"]
+        D3["dlq.jdbc-sink-aurora.erp\nfailed records + context headers"]
+        D4["dlq.jdbc-sink-aurora.critical\nfailed records + context headers"]
+    end
+
+    subgraph TARGET["Target Database"]
+        AUR["Aurora PostgreSQL"]
+    end
+
+    subgraph OPS["Operations"]
+        MON["JMX Metrics / Monitoring / Alerts"]
+        TRIAGE["Inspect DLQ\n(topic + headers + logs)"]
+        R1["Optional Remediation Connector\nreads DLQ with different converter/config"]
+        REPLAY["Controlled Replay / Reprocess"]
+    end
+
+    DB1 --> SRC1
+    DB2 --> SRC1
+    DB3 --> SRC1
+    DB4 --> SRC1
+
+    SRC1 --> T1
+    SRC1 --> T2
+    SRC1 --> T3
+    SRC1 --> T4
+
+    T1 --> C1
+    T2 --> C2
+    T3 --> C3
+    T4 --> C4
+
+    C1 -->|valid records continue| AUR
+    C2 -->|valid records continue| AUR
+    C3 -->|valid records continue| AUR
+    C4 -->|valid records continue| AUR
+
+    C1 -->|deserialization / conversion / data errors| D1
+    C2 -->|deserialization / conversion / data errors| D2
+    C3 -->|deserialization / conversion / data errors| D3
+    C4 -->|deserialization / conversion / data errors| D4
+
+    D1 --> TRIAGE
+    D2 --> TRIAGE
+    D3 --> TRIAGE
+    D4 --> TRIAGE
+
+    C1 --> MON
+    C2 --> MON
+    C3 --> MON
+    C4 --> MON
+    D1 --> MON
+    D2 --> MON
+    D3 --> MON
+    D4 --> MON
+
+    D1 -.optional second sink for alternate parsing / remediation.-> R1
+    D2 -.optional second sink for alternate parsing / remediation.-> R1
+    D3 -.optional second sink for alternate parsing / remediation.-> R1
+    D4 -.optional second sink for alternate parsing / remediation.-> R1
+
+    TRIAGE --> REPLAY
+    R1 --> REPLAY
+```
 
 ---
 
