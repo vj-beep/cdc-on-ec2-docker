@@ -8,11 +8,102 @@ Self-managed Confluent Platform 8.x on EC2 with Docker Compose, KRaft mode (no Z
 
 ---
 
+## Architecture — 5-Node Layout
+
+```mermaid
+graph TB
+    %% ── Source and Target Databases ─────────────────────────
+    SQLDB[("<b>SQL Server</b><br/>pocdb :1433<br/><i>CDC enabled</i>")]
+    PGDB[("<b>Aurora PostgreSQL</b><br/>pocdb :5432<br/><i>Logical replication</i>")]
+
+    %% ── EC2 Nodes 1-3: Pure Kafka Brokers ──────────────────
+    subgraph N1["<b>Node 1</b> &mdash; i3.4xlarge"]
+        B1["Broker 1<br/>KRaft Controller<br/>:9092 / :9093"]
+    end
+
+    subgraph N2["<b>Node 2</b> &mdash; i3.4xlarge"]
+        B2["Broker 2<br/>KRaft Controller<br/>:9092 / :9093"]
+    end
+
+    subgraph N3["<b>Node 3</b> &mdash; i3.4xlarge"]
+        B3["Broker 3<br/>KRaft Controller<br/>:9092 / :9093"]
+    end
+
+    %% ── EC2 Node 4: CDC Integration ────────────────────────
+    subgraph N4["<b>Node 4</b> &mdash; m5.2xlarge"]
+        CW1["Connect Worker 1<br/>Forward CDC :8083"]
+        CW2["Connect Worker 2<br/>Reverse CDC :8084"]
+        SR["Schema Registry :8081"]
+    end
+
+    %% ── EC2 Node 5: Ops + Monitoring ───────────────────────
+    subgraph N5["<b>Node 5</b> &mdash; m5d.2xlarge"]
+        CC["Control Center :9021"]
+        KSQL["ksqlDB :8088"]
+        RP["REST Proxy :8082"]
+        FK_JM["Apache Flink® JobManager"]
+        FK_TM["Apache Flink® TaskManager"]
+        PR["Prometheus :9090"]
+        GR["Grafana :8080"]
+        AM["Alertmanager"]
+        NE["Node Exporter"]
+        CV["cAdvisor"]
+    end
+
+    %% ── Forward CDC Path: SQL Server → Aurora ──────────────
+    SQLDB -- "Forward: Debezium Source" --> CW1
+    CW1 -- "Forward: JDBC Sink" --> PGDB
+
+    %% ── Reverse CDC Path: Aurora → SQL Server ──────────────
+    PGDB -- "Reverse: Debezium Source" --> CW2
+    CW2 -- "Reverse: JDBC Sink" --> SQLDB
+
+    %% ── Connect Workers ↔ Kafka Cluster ────────────────────
+    CW1 -. "produce / consume" .-> B1 & B2 & B3
+    CW2 -. "produce / consume" .-> B1 & B2 & B3
+
+    %% ── Stream Processing → Kafka ──────────────────────────
+    KSQL -. "read / write" .-> B1
+
+    %% ── Monitoring ─────────────────────────────────────────
+    PR -. "JMX / node metrics" .-> N1 & N2 & N3 & N4
+
+    %% ── Styling ─────────────────────────────────────────────
+    style SQLDB fill:#FCE4EC,stroke:#C62828,stroke-width:2px,color:#333
+    style PGDB fill:#E3F2FD,stroke:#1565C0,stroke-width:2px,color:#333
+```
+
+### Infrastructure Requirements
+
+| Role | vCPU | RAM | Storage | Purpose |
+|------|------|-----|---------|---------|
+| **Broker** (×3) | 8+ | 32+ GB | 100+ GB NVMe-equiv | Fast sequential I/O for Kafka log writes. NVMe strongly recommended; EBS with IOPS acceptable. |
+| **Connect** | 4+ | 16+ GB | 20+ GB | CPU-bound (Java plugins). Runs two Connect workers (forward + reverse paths). |
+| **Monitor** | 4+ | 16+ GB | 50+ GB SSD | Local time-series storage for Prometheus. Can use standard SSD or NVMe. |
+
+**Reference sizing (AWS):**
+- Brokers: i3.4xlarge (16 vCPU, 122 GB RAM, 2×1.9 TB NVMe) or similar in your cloud
+- Connect: m5.2xlarge (8 vCPU, 32 GB RAM) or equivalent
+- Monitor: m5d.2xlarge (8 vCPU, 32 GB RAM, 1×300 GB NVMe) or equivalent
+
+**On-premises:** Allocate comparable resources. NVMe or local SSD strongly recommended for brokers.
+
+### Bi-directional CDC
+
+```
+SQL Server ──→ Debezium Source ──→ Kafka Topics ──→ JDBC Sink ──→ Aurora PostgreSQL
+                                       ↓
+                                    (reverse)
+                                       ↓
+Aurora PostgreSQL ──→ Debezium Source ──→ Kafka Topics ──→ JDBC Sink ──→ SQL Server
+```
+
+---
+
 ## Table of Contents
 
 - [Quick Start](#-quick-start--deployment-in-7-phases--helpers)
 - [Prerequisites](#prerequisites)
-- [Architecture](#architecture--5-node-layout)
 - [Monitoring & Operations](#monitoring--operations)
 - [Troubleshooting](#troubleshooting)
 - [Documentation](#documentation)
@@ -155,100 +246,6 @@ test -f .env && echo "✅ .env found" || echo "❌ .env missing"
 ```
 
 Once all 4 steps are complete, proceed to [README-DEPLOYMENT.md](README-DEPLOYMENT.md) and run Phase 0.
-
----
-
-## Architecture — 5-Node Layout
-
-```mermaid
-graph TB
-    %% ── Source and Target Databases ─────────────────────────
-    SQLDB[("<b>SQL Server</b><br/>pocdb :1433<br/><i>CDC enabled</i>")]
-    PGDB[("<b>Aurora PostgreSQL</b><br/>pocdb :5432<br/><i>Logical replication</i>")]
-
-    %% ── EC2 Nodes 1-3: Pure Kafka Brokers ──────────────────
-    subgraph N1["<b>Node 1</b> &mdash; i3.4xlarge"]
-        B1["Broker 1<br/>KRaft Controller<br/>:9092 / :9093"]
-    end
-
-    subgraph N2["<b>Node 2</b> &mdash; i3.4xlarge"]
-        B2["Broker 2<br/>KRaft Controller<br/>:9092 / :9093"]
-    end
-
-    subgraph N3["<b>Node 3</b> &mdash; i3.4xlarge"]
-        B3["Broker 3<br/>KRaft Controller<br/>:9092 / :9093"]
-    end
-
-    %% ── EC2 Node 4: CDC Integration ────────────────────────
-    subgraph N4["<b>Node 4</b> &mdash; m5.2xlarge"]
-        CW1["Connect Worker 1<br/>Forward CDC :8083"]
-        CW2["Connect Worker 2<br/>Reverse CDC :8084"]
-        SR["Schema Registry :8081"]
-    end
-
-    %% ── EC2 Node 5: Ops + Monitoring ───────────────────────
-    subgraph N5["<b>Node 5</b> &mdash; m5d.2xlarge"]
-        CC["Control Center :9021"]
-        KSQL["ksqlDB :8088"]
-        RP["REST Proxy :8082"]
-        FK_JM["Apache Flink® JobManager"]
-        FK_TM["Apache Flink® TaskManager"]
-        PR["Prometheus :9090"]
-        GR["Grafana :8080"]
-        AM["Alertmanager"]
-        NE["Node Exporter"]
-        CV["cAdvisor"]
-    end
-
-    %% ── Forward CDC Path: SQL Server → Aurora ──────────────
-    SQLDB -- "Forward: Debezium Source" --> CW1
-    CW1 -- "Forward: JDBC Sink" --> PGDB
-
-    %% ── Reverse CDC Path: Aurora → SQL Server ──────────────
-    PGDB -- "Reverse: Debezium Source" --> CW2
-    CW2 -- "Reverse: JDBC Sink" --> SQLDB
-
-    %% ── Connect Workers ↔ Kafka Cluster ────────────────────
-    CW1 -. "produce / consume" .-> B1 & B2 & B3
-    CW2 -. "produce / consume" .-> B1 & B2 & B3
-
-    %% ── Stream Processing → Kafka ──────────────────────────
-    KSQL -. "read / write" .-> B1
-
-    %% ── Monitoring ─────────────────────────────────────────
-    PR -. "JMX / node metrics" .-> N1 & N2 & N3 & N4
-
-    %% ── Styling ─────────────────────────────────────────────
-    style SQLDB fill:#FCE4EC,stroke:#C62828,stroke-width:2px,color:#333
-    style PGDB fill:#E3F2FD,stroke:#1565C0,stroke-width:2px,color:#333
-```
-
-### Infrastructure Requirements
-
-| Role | vCPU | RAM | Storage | Purpose |
-|------|------|-----|---------|---------|
-| **Broker** (×3) | 8+ | 32+ GB | 100+ GB NVMe-equiv | Fast sequential I/O for Kafka log writes. NVMe strongly recommended; EBS with IOPS acceptable. |
-| **Connect** | 4+ | 16+ GB | 20+ GB | CPU-bound (Java plugins). Runs two Connect workers (forward + reverse paths). |
-| **Monitor** | 4+ | 16+ GB | 50+ GB SSD | Local time-series storage for Prometheus. Can use standard SSD or NVMe. |
-
-**Reference sizing (AWS):**
-- Brokers: i3.4xlarge (16 vCPU, 122 GB RAM, 2×1.9 TB NVMe) or similar in your cloud
-- Connect: m5.2xlarge (8 vCPU, 32 GB RAM) or equivalent
-- Monitor: m5d.2xlarge (8 vCPU, 32 GB RAM, 1×300 GB NVMe) or equivalent
-
-**On-premises:** Allocate comparable resources. NVMe or local SSD strongly recommended for brokers.
-
-### Bi-directional CDC
-
-```
-SQL Server ──→ Debezium Source ──→ Kafka Topics ──→ JDBC Sink ──→ Aurora PostgreSQL
-                                       ↓
-                                    (reverse)
-                                       ↓
-Aurora PostgreSQL ──→ Debezium Source ──→ Kafka Topics ──→ JDBC Sink ──→ SQL Server
-```
-
-**Loop prevention:** Source-specific Kafka headers (`__cdc_from_sqlserver`, `__cdc_from_aurora`) via `InsertHeader` SMT + `HasHeaderKey` predicate prevent infinite replication cycles. No schema changes required.
 
 ---
 
