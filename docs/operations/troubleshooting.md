@@ -4,11 +4,10 @@ Common issues, diagnostic commands, and solutions for the CDC deployment.
 
 ## Quick Links
 
-- **Service startup delays?** → See [INITIALIZATION-TIMELINES.md](INITIALIZATION-TIMELINES.md) for expected timelines
-- **Common operations?** → See [QUICK-REFERENCE-CHEAT-SHEET.md](QUICK-REFERENCE-CHEAT-SHEET.md) for quick commands
-- **Tuning & performance?** → See [DEPLOYMENT-TUNING-PROFILES.md](DEPLOYMENT-TUNING-PROFILES.md) for profile switching
-- **Loop prevention issues?** → See [LOOP-PREVENTION.md](LOOP-PREVENTION.md) for Apache Kafka® Headers setup
-- **Service health check?** → Use `./scripts/ops-health-check.sh` or [QUICK-REFERENCE-CHEAT-SHEET.md](QUICK-REFERENCE-CHEAT-SHEET.md)
+- **Service startup delays?** → See [../operations/startup.md](../operations/startup.md) for expected timelines
+- **Common operations?** → See [../reference/cheat-sheet.md](../reference/cheat-sheet.md) for quick commands
+- **Tuning & performance?** → See [../performance/profiles.md](../performance/profiles.md) for profile switching
+- **Service health check?** → Use `./scripts/ops-health-check.sh` or [../reference/cheat-sheet.md](../reference/cheat-sheet.md)
 
 ---
 
@@ -319,7 +318,7 @@ du -sh /data/kafka/kraft-combined-logs/* | sort -rh | head -20
    kafka-topics --bootstrap-server ${BROKER_1_IP}:9092 --list | grep offset
    ```
 
-3. **Purge DLQ topics** if they have grown large (see [DLQ-OPERATIONS.md](DLQ-OPERATIONS.md)).
+3. **Purge DLQ topics** if they have grown large (see [dlq.md](dlq.md)).
 
 4. **Long term:** Add brokers, increase NVMe capacity, or reduce the number of partitions.
 
@@ -645,7 +644,7 @@ docker logs broker-1 | grep -i "quorum" | tail -10
 
 **DO NOT:** Restart the broker or increase timeout. KRaft election timing varies based on quorum negotiation.
 
-See [INITIALIZATION-TIMELINES.md](INITIALIZATION-TIMELINES.md) for detailed service startup timelines.
+See [../operations/startup.md](../operations/startup.md) for detailed service startup timelines.
 
 ### Docker Build Takes 10+ Minutes
 
@@ -687,7 +686,7 @@ curl -s http://localhost:8083/connectors
 docker logs connect-1 | grep -i "started"
 ```
 
-See `docs/INITIALIZATION-TIMELINES.md` for expected timelines per service.
+See `docs/operations/startup.md` for expected timelines per service.
 
 ### Validation Script Hangs on Port Checks
 

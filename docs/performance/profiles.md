@@ -86,7 +86,7 @@ curl -s http://localhost:8083/connectors/debezium-sqlserver-source/status \
 | `JDBC_SINK_AURORA_TASKS_MAX` | 4 | 2 |
 | `JDBC_SINK_SQLSERVER_TASKS_MAX` | 1 | 1 |
 
-For full tuning rationale and advanced configuration, see [TUNING-BEST-PRACTICES.md](TUNING-BEST-PRACTICES.md).
+For full tuning rationale and advanced configuration, see [best-practices.md](best-practices.md).
 
 ---
 

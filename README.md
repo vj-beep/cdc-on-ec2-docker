@@ -65,7 +65,7 @@ Before starting any deployment script, verify:
 - ✅ **SQL Server database** — accessible from EC2 nodes, empty database ready (RDS or on-premises — see note below)
 - ✅ **Network connectivity** — EC2 nodes can reach both databases on ports 5432 (Aurora) and 1433 (SQL Server)
 
-> **On-premises SQL Server:** If SQL Server is on-premises rather than RDS, three things change: (1) use `EXEC sys.sp_cdc_enable_db` instead of `msdb.dbo.rds_cdc_enable_db` in the prep script; (2) the orphaned SID issue does not apply — `cdc_reader` can be used for both source and sink connectors; (3) sub-250ms CDC latency is achievable by running `sp_update_jobstep /pollinginterval 0` as `sa` at setup time. Network connectivity from EC2 to on-premises requires AWS Direct Connect or Site-to-Site VPN on port 1433. See [TUNING-BEST-PRACTICES.md](docs/TUNING-BEST-PRACTICES.md#on-premises-sql-server) for full details.
+> **On-premises SQL Server:** If SQL Server is on-premises rather than RDS, three things change: (1) use `EXEC sys.sp_cdc_enable_db` instead of `msdb.dbo.rds_cdc_enable_db` in the prep script; (2) the orphaned SID issue does not apply — `cdc_reader` can be used for both source and sink connectors; (3) sub-250ms CDC latency is achievable by running `sp_update_jobstep /pollinginterval 0` as `sa` at setup time. Network connectivity from EC2 to on-premises requires AWS Direct Connect or Site-to-Site VPN on port 1433. See [docs/performance/best-practices.md](docs/performance/best-practices.md#on-premises-sql-server) for full details.
 
 **How to verify:**
 ```bash
@@ -298,21 +298,21 @@ Aurora PostgreSQL ──→ Debezium Source ──→ Kafka Topics ──→ JDB
 | Phase 6 fails: "Connect not responding" | Verify `5-start-node.sh connect` completed and is running |
 | Phase 7 fails: "No data in Aurora" | Check connector status: `curl http://localhost:8083/connectors/<name>/status` |
 
-See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for detailed troubleshooting.
+See [docs/operations/troubleshooting.md](docs/operations/troubleshooting.md) for detailed troubleshooting.
 
 ---
 
 ## Documentation
 
 - **[README-DEPLOYMENT.md](README-DEPLOYMENT.md)** ← Start here! Complete step-by-step workflow
-- **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** — Deep troubleshooting guide
-- **[docs/LOOP-PREVENTION.md](docs/LOOP-PREVENTION.md)** — Bi-directional CDC loop prevention design
-- **[docs/DLQ-OPERATIONS.md](docs/DLQ-OPERATIONS.md)** — Dead Letter Queue operations and replay
-- **[docs/TUNING-BEST-PRACTICES.md](docs/TUNING-BEST-PRACTICES.md)** — Performance tuning for snapshot and streaming
-- **[docs/DEPLOYMENT-TUNING-PROFILES.md](docs/DEPLOYMENT-TUNING-PROFILES.md)** — Snapshot vs. streaming profile switching
-- **[docs/NODE-DISTRIBUTION.md](docs/NODE-DISTRIBUTION.md)** — Node roles and service layout
-- **[docs/INITIALIZATION-TIMELINES.md](docs/INITIALIZATION-TIMELINES.md)** — Expected startup durations per service
-- **[docs/QUICK-REFERENCE-CHEAT-SHEET.md](docs/QUICK-REFERENCE-CHEAT-SHEET.md)** — Common commands at a glance
+- **[docs/README.md](docs/README.md)** — Documentation index and TOC
+- **[docs/operations/troubleshooting.md](docs/operations/troubleshooting.md)** — Deep troubleshooting guide
+- **[docs/operations/dlq.md](docs/operations/dlq.md)** — Dead Letter Queue operations and replay
+- **[docs/performance/best-practices.md](docs/performance/best-practices.md)** — Performance tuning for snapshot and streaming
+- **[docs/performance/profiles.md](docs/performance/profiles.md)** — Snapshot vs. streaming profile switching
+- **[docs/architecture/topology.md](docs/architecture/topology.md)** — Node roles and service layout
+- **[docs/operations/startup.md](docs/operations/startup.md)** — Expected startup durations per service
+- **[docs/reference/cheat-sheet.md](docs/reference/cheat-sheet.md)** — Common commands at a glance
 
 ---
 
@@ -331,8 +331,8 @@ All use SMT transforms, at-least-once delivery, and Dead Letter Queues.
 
 ## Support
 
-- Check [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) first
-- Review [docs/QUICK-REFERENCE-CHEAT-SHEET.md](docs/QUICK-REFERENCE-CHEAT-SHEET.md) for common commands
+- Check [docs/operations/troubleshooting.md](docs/operations/troubleshooting.md) first
+- Review [docs/reference/cheat-sheet.md](docs/reference/cheat-sheet.md) for common commands
 - See phase-specific logs: `docker logs <service>`
 
 ---

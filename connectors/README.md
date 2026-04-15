@@ -77,7 +77,7 @@ Each source connector stamps records with a source-specific Kafka header key:
 - SQL Server source adds: `__cdc_from_sqlserver`
 - PostgreSQL source adds: `__cdc_from_aurora`
 
-Each sink connector drops records carrying the header key matching its own target system, preventing infinite replication cycles. See [docs/LOOP-PREVENTION.md](../docs/LOOP-PREVENTION.md) for full details.
+Each sink connector drops records carrying the header key matching its own target system, preventing infinite replication cycles.
 
 ## Dead Letter Queues
 
@@ -85,7 +85,7 @@ Both sink connectors write failed records to dedicated DLQ topics:
 - `dlq-jdbc-sink-aurora`
 - `dlq-jdbc-sink-sqlserver`
 
-See [docs/DLQ-OPERATIONS.md](../docs/DLQ-OPERATIONS.md) for inspection and replay procedures.
+See [../docs/operations/dlq.md](../docs/operations/dlq.md) for inspection and replay procedures.
 
 ---
 

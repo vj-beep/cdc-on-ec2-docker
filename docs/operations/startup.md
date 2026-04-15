@@ -58,7 +58,7 @@ curl -sf http://localhost:8084/connectors && echo "Connect Worker 2 ready"
 
 Control Center creates its internal topics on first start. Subsequent starts are faster.
 
-> **If Control Center crash-loops**, see the [MetricsAggregateStore issue](TROUBLESHOOTING.md#control-center-crash-loop-metricsaggregatestore-partition-mismatch) in TROUBLESHOOTING.md.
+> **If Control Center crash-loops**, see the [MetricsAggregateStore issue](troubleshooting.md#control-center-crash-loop-metricsaggregatestore-partition-mismatch) in troubleshooting.md.
 
 ## ksqlDB
 

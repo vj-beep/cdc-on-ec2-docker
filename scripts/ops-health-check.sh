@@ -189,5 +189,5 @@ echo "  1. If all checks passed (✓): Proceed to connector deployment"
 echo "  2. If any failed (✗): Check logs with:"
 echo "     - docker ps              (check running containers)"
 echo "     - docker logs <service>  (check service logs)"
-echo "     - See docs/INITIALIZATION-TIMELINES.md for troubleshooting"
+echo "     - See docs/operations/startup.md for troubleshooting"
 echo
