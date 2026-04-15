@@ -111,6 +111,76 @@ The JDBC Sink connector should NOT be used for:
 
 ---
 
+## Connector vs. Schema Migration Responsibilities
+
+This matrix clarifies which tool owns each task in a CDC migration:
+
+| Responsibility | Debezium Source | JDBC Sink | Schema Migration Tool / DBA |
+|---|:---:|:---:|:---:|
+| **CDC Data Movement** | | | |
+| Capture source DB changes | ✅ Yes | — | — |
+| Initial snapshot of source data | ✅ Yes | — | — |
+| Write CDC events to Kafka | ✅ Yes | — | — |
+| Create / use Kafka topics | ✅ Yes | ✅ Yes | — |
+| Maintain source schema history for CDC interpretation | ✅ Yes | — | — |
+| **Target Schema Creation** | | | |
+| Create target tables | — | ⚠️ Sometimes* | ✅ Yes |
+| Add / evolve target columns | — | ⚠️ Sometimes* | ✅ Yes |
+| Apply inserts / updates / deletes to target DB | — | ✅ Yes | — |
+| **Constraints & Indexes** | | | |
+| Create primary keys | — | ⚠️ Limited* | ✅ Yes |
+| Create unique constraints | — | ⚠️ Not reliable* | ✅ Yes |
+| Create foreign keys / referential integrity | — | ❌ No | ✅ Yes |
+| Create secondary indexes | — | ❌ No | ✅ Yes |
+| Migrate clustered / nonclustered index design | — | ❌ No | ✅ Yes |
+| Migrate filtered / included-column indexes | — | ❌ No | ✅ Yes |
+| **Advanced Schema Objects** | | | |
+| Migrate views | — | ❌ No | ✅ Yes |
+| Migrate stored procedures | — | ❌ No | ✅ Yes |
+| Migrate triggers | — | ❌ No | ✅ Yes |
+| **Performance & Design** | | | |
+| Own target performance tuning | — | ❌ No | ✅ Yes |
+
+**Legend:**
+- ✅ **Yes** — This tool/team is responsible and designed for this task
+- ⚠️ **Limited / Sometimes** — Available as a convenience feature but not reliable for migrations; better handled by DBA
+- ❌ **No** — This tool does not support this task
+- **\*** See implementation note below
+
+### Implementation Notes
+
+**JDBC Sink `auto.create` caveat:**
+- If `auto.create=true`, JDBC Sink will create basic tables matching Kafka schema
+- **However:** Auto-created tables include **all source indexes**, which slows initial load
+- **Better approach:** Pre-create essential tables with only necessary indexes (Phase 1), let JDBC Sink upsert rows
+
+**JDBC Sink `auto.evolve` caveat:**
+- If `auto.evolve=true`, JDBC Sink adds new columns when source schema changes
+- **However:** Column additions may have ordering or compatibility issues
+- **Better approach:** Plan schema changes with DBA; apply DDL separately if needed
+
+**Primary key creation by JDBC Sink:**
+- JDBC Sink uses `pk.mode=record_key` to infer PKs from Kafka message keys
+- **However:** If key is composite or NULL, this fails silently or creates wrong constraints
+- **Better approach:** Define PKs explicitly in Phase 1
+
+---
+
+## Rule of Thumb
+
+```
+Source Connector  →  Move change events reliably
+Sink Connector    →  Apply row changes efficiently
+Schema Tools/DBA  →  Own database structure and performance design
+```
+
+Each tool excels at its specific job. Trying to use connectors for schema migration creates:
+- **Operational burden** — managing constraints via connector config instead of DDL
+- **Performance risk** — index overhead, constraint violations, validation delays
+- **Maintenance risk** — connector restarts or redeployments might corrupt schema state
+
+---
+
 ## Recommended Operating Model
 
 Follow this 5-phase approach to align with Confluent and Kafka best practices:
