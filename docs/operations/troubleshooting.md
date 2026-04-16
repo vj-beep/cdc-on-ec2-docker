@@ -711,6 +711,42 @@ nc -z -v -w 5 localhost 9093
 
 ## Phase 4: Connect Image Build Issues
 
+### Proxy: "context deadline exceeded" or confluent-hub Exit Code 7
+
+**Symptoms:**
+- `context deadline exceeded` when pulling the base image from Docker Hub
+- `confluent-hub install` returns exit code 7 (cannot reach hub.confluent.io)
+- `curl` fails downloading from Maven Central
+
+**Root Cause:** EC2 nodes have no direct internet access — egress goes through a corporate proxy.
+
+**Fix:** Set all 5 proxy variables in `.env`:
+```bash
+HTTP_PROXY=http://proxy.corp.example.com:8080
+HTTPS_PROXY=http://proxy.corp.example.com:8080
+NO_PROXY=localhost,127.0.0.1,169.254.169.254
+PROXY_HOST=proxy.corp.example.com
+PROXY_PORT=8080
+```
+
+Then re-run Phase 3 (configures Docker daemon proxy) and Phase 4 (build):
+```bash
+./scripts/3-setup-ec2.sh        # Creates /etc/systemd/system/docker.service.d/http-proxy.conf
+./scripts/4-build-connect.sh    # Passes proxy to both curl and confluent-hub
+```
+
+**How it works — three proxy layers:**
+
+| Layer | Mechanism | What it covers |
+|-------|-----------|---------------|
+| Docker daemon | `http-proxy.conf` systemd drop-in (Phase 3) | Image pulls from Docker Hub |
+| `curl` in Dockerfile | `HTTP_PROXY`/`HTTPS_PROXY` build args (automatic) | Maven Central downloads |
+| `confluent-hub install` (Java) | `JAVA_TOOL_OPTIONS` with `-Dhttps.proxyHost` | Confluent Hub downloads |
+
+**Why `HTTP_PROXY` alone is not enough:** `confluent-hub` is a Java application. Java ignores `HTTP_PROXY`/`HTTPS_PROXY` environment variables — it only reads JVM system properties (`-Dhttps.proxyHost`/`-Dhttps.proxyPort`). The Dockerfile uses `JAVA_TOOL_OPTIONS` (the officially supported JVMTI mechanism) to inject these properties, then clears it at the end so proxy settings don't leak into Connect workers at runtime.
+
+---
+
 ### Docker BuildKit Context Error (Phase 4 Failure)
 
 **Symptoms:**

@@ -164,6 +164,19 @@ CLUSTER_ID=<generate-with-command-below>               # Unique cluster ID (KRaf
 KAFKA_REPLICATION_FACTOR=3                # RF for all Kafka topics
 ```
 
+### HTTP Proxy (Optional)
+```
+HTTP_PROXY=                                # Docker daemon + curl (image pulls, Maven downloads)
+HTTPS_PROXY=                               # Same as HTTP_PROXY for HTTPS endpoints
+NO_PROXY=localhost,127.0.0.1,169.254.169.254  # Bypass proxy for local/metadata traffic
+PROXY_HOST=                                # Java proxy host for confluent-hub install (e.g., proxy.corp.example.com)
+PROXY_PORT=8080                            # Java proxy port (default: 8080)
+```
+
+**Why two sets of proxy vars?** `confluent-hub install` is a Java application that ignores `HTTP_PROXY`/`HTTPS_PROXY` env vars. It requires JVM system properties (`-Dhttps.proxyHost`) passed via `JAVA_TOOL_OPTIONS`. The Dockerfile handles this automatically — just set `PROXY_HOST` and `PROXY_PORT` in `.env`.
+
+Leave all proxy vars empty if nodes have direct internet access.
+
 ### Performance Tuning (Snapshot Profile)
 ```
 CONNECT_CONSUMER_MAX_POLL_RECORDS=5000     # Records per fetch (high for throughput)
