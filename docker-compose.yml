@@ -37,6 +37,11 @@ services:
       - ${KAFKA_DATA_DIR}:/data/kafka
       - ./monitoring/jmx-exporter:/etc/jmx-exporter:ro
     environment:
+      # --- HTTP Proxy (optional — for Confluent license checks, telemetry) ---
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
+
       # --- KRaft (overridden per node) ---
       KAFKA_NODE_ID: "SET_IN_NODE_OVERLAY"
       KAFKA_PROCESS_ROLES: broker,controller
@@ -101,6 +106,9 @@ services:
     volumes:
       - ./monitoring/jmx-exporter:/etc/jmx-exporter:ro
     environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
       SCHEMA_REGISTRY_HOST_NAME: ${CONNECT_1_IP}
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: ${BROKER_1_IP}:9092,${BROKER_2_IP}:9092,${BROKER_3_IP}:9092
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:${SCHEMA_REGISTRY_PORT}
@@ -129,6 +137,9 @@ services:
     volumes:
       - ./monitoring/jmx-exporter:/etc/jmx-exporter:ro
     environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
       CONNECT_BOOTSTRAP_SERVERS: ${BROKER_1_IP}:9092,${BROKER_2_IP}:9092,${BROKER_3_IP}:9092
       CONNECT_REST_PORT: 8083
       CONNECT_LISTENERS: http://0.0.0.0:8083
@@ -191,6 +202,9 @@ services:
     volumes:
       - ./monitoring/jmx-exporter:/etc/jmx-exporter:ro
     environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
       CONNECT_BOOTSTRAP_SERVERS: ${BROKER_1_IP}:9092,${BROKER_2_IP}:9092,${BROKER_3_IP}:9092
       CONNECT_REST_PORT: 8084
       CONNECT_LISTENERS: http://0.0.0.0:8084
@@ -242,6 +256,9 @@ services:
     network_mode: host
     restart: unless-stopped
     environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
       CONTROL_CENTER_BOOTSTRAP_SERVERS: ${BROKER_1_IP}:9092,${BROKER_2_IP}:9092,${BROKER_3_IP}:9092
       CONTROL_CENTER_SCHEMA_REGISTRY_URL: http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}
       CONTROL_CENTER_SCHEMA_REGISTRY_ENABLE: "true"
@@ -265,6 +282,9 @@ services:
     network_mode: host
     restart: unless-stopped
     environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
       KSQL_BOOTSTRAP_SERVERS: ${BROKER_1_IP}:9092,${BROKER_2_IP}:9092,${BROKER_3_IP}:9092
       KSQL_LISTENERS: http://0.0.0.0:${KSQLDB_PORT}
       KSQL_KSQL_SCHEMA_REGISTRY_URL: http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}
@@ -281,6 +301,9 @@ services:
     network_mode: host
     restart: unless-stopped
     environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
       KAFKA_REST_HOST_NAME: ${MONITOR_1_IP}
       KAFKA_REST_BOOTSTRAP_SERVERS: ${BROKER_1_IP}:9092,${BROKER_2_IP}:9092,${BROKER_3_IP}:9092
       KAFKA_REST_LISTENERS: http://0.0.0.0:8082
@@ -296,6 +319,9 @@ services:
     restart: unless-stopped
     command: jobmanager
     environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: ${MONITOR_1_IP}
         jobmanager.rpc.port: 6123
@@ -308,6 +334,9 @@ services:
     restart: unless-stopped
     command: taskmanager
     environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: ${MONITOR_1_IP}
         jobmanager.rpc.port: 6123
@@ -340,6 +369,9 @@ services:
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
       GF_SERVER_HTTP_PORT: ${GRAFANA_PORT}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -354,6 +386,10 @@ services:
     restart: unless-stopped
     volumes:
       - ./monitoring/alertmanager:/etc/alertmanager:ro
+    environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --web.listen-address=:9093
