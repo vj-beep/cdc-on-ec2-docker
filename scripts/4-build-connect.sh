@@ -8,14 +8,18 @@
 #   - Phase 3 completed (setup-ec2.sh on all nodes)
 #   - Node 4 (connect) has repo cloned and .env available
 #
-# Usage: ./scripts/4-build-connect.sh
+# Usage (from jumpbox — dispatches to Node 4 via SSM):
+#   ./scripts/4-build-connect.sh
+#
+# Usage (on Node 4 — direct execution):
+#   ./scripts/4-build-connect.sh --local
+#
 # ============================================================
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
-AWS_REGION=${AWS_REGION:-us-east-1}
 
 if [[ ! -f "$ENV_FILE" ]]; then
     echo "[ERROR] .env not found"
@@ -23,6 +27,29 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 source "$ENV_FILE"
+
+# ---------------------------------------------------------------------------
+# Local mode: build directly on this node (Node 4)
+# ---------------------------------------------------------------------------
+if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
+    echo "[*] Phase 4 (local): Building custom Connect image..."
+    echo "[*] Building image (this may take 5-10 minutes)..."
+
+    export HTTP_PROXY HTTPS_PROXY NO_PROXY
+    DOCKER_BUILDKIT=0 docker compose -f docker-compose.connect-build.yml build
+
+    echo ""
+    echo "[OK] Connect image built successfully"
+    docker images | grep cdc-connect
+    echo ""
+    echo "Next: ./scripts/5-start-node.sh --local connect"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# SSM Dispatch mode: send build command to Node 4 remotely
+# ---------------------------------------------------------------------------
+AWS_REGION=${AWS_REGION:-us-east-1}
 
 if [[ -z "$CONNECT_1_IP" ]]; then
     echo "[ERROR] CONNECT_1_IP not set"
