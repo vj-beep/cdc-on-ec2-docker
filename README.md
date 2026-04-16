@@ -10,6 +10,8 @@ Self-managed Confluent Platform 8.x on EC2 with Docker Compose, KRaft mode (no Z
 
 ## Architecture — 5-Node Layout
 
+> ⚠️ **POC/Dev Deployment Only:** This 5-node layout is optimized for evaluation and development. For **production deployments**, follow Confluent Platform co-location rules and isolation best practices. See [**Confluent Platform — Node Co-location Rules & Best Practices**](docs/architecture/colocaton-best-practices.md) for detailed guidance on which components can safely share nodes, hardware sizing per component, and reference architectures for small and large clusters.
+
 ```mermaid
 graph TB
     %% ── Source and Target Databases ─────────────────────────
