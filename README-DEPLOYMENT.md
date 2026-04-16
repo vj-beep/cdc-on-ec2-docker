@@ -60,7 +60,7 @@ cp .env.template .env
 | Aurora PostgreSQL | `AURORA_HOST`, `AURORA_PASSWORD` | `terraform output aurora_password` or AWS Console → RDS → Cluster endpoint |
 | SQL Server | `SQLSERVER_HOST`, `SQLSERVER_PASSWORD` | `terraform output sqlserver_password` or AWS Console → RDS → Instance endpoint |
 | CDC Reader | `CDC_READER_PASSWORD` | Generate a strong password; used by JDBC sink connectors to authenticate |
-| KRaft Cluster ID | `CLUSTER_ID` | Generate once: `docker run --rm confluentinc/cp-server:8.0.0 kafka-storage random-uuid` (use version from `CP_VERSION` in .env.template) |
+| KRaft Cluster ID | `CLUSTER_ID` | Generate once: `python3 -c "import uuid,base64; print(base64.urlsafe_b64encode(uuid.uuid4().bytes).decode().rstrip('='))"` |
 | Public Repo | `PUBLIC_REPO_URL` | Your GitHub URL for this repository |
 
 ### Step 3: Configure CDC tables

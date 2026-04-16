@@ -71,7 +71,7 @@ vim .env
 #   - CONNECT_1_IP, MONITOR_1_IP (same)
 #   - AURORA_* credentials (from AWS RDS console)
 #   - SQLSERVER_* credentials (from AWS RDS or on-premises)
-#   - CLUSTER_ID (generate: docker run --rm confluentinc/cp-server:8.0.0 kafka-storage random-uuid)
+#   - CLUSTER_ID (generate: python3 -c "import uuid,base64; print(base64.urlsafe_b64encode(uuid.uuid4().bytes).decode().rstrip('='))")
 
 # 3. Validate
 ./scripts/1-validate-env.sh
@@ -160,7 +160,7 @@ SQLSERVER_PASSWORD=<secure-password>
 ### Apache Kafka® Configuration
 ```
 CP_VERSION=8.0.0                           # Confluent Platform version
-CLUSTER_ID=<generate-with-kafka-storage-random-uuid>   # Unique cluster ID (KRaft mode)
+CLUSTER_ID=<generate-with-command-below>               # Unique cluster ID (KRaft mode)
 KAFKA_REPLICATION_FACTOR=3                # RF for all Kafka topics
 ```
 
