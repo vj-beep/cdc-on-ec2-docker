@@ -164,18 +164,38 @@ CLUSTER_ID=<generate-with-command-below>               # Unique cluster ID (KRaf
 KAFKA_REPLICATION_FACTOR=3                # RF for all Kafka topics
 ```
 
-### HTTP Proxy (Optional)
+### HTTP Proxy (Required for Most Enterprise Environments)
+
+Most enterprise AWS environments route EC2 internet traffic through a corporate HTTP proxy. These variables configure proxy support across the entire deployment pipeline.
+
 ```
-HTTP_PROXY=                                # Docker daemon + curl (image pulls, Maven downloads)
-HTTPS_PROXY=                               # Same as HTTP_PROXY for HTTPS endpoints
-NO_PROXY=localhost,127.0.0.1,169.254.169.254  # Bypass proxy for local/metadata traffic
-PROXY_HOST=                                # Java proxy host for confluent-hub install (e.g., proxy.corp.example.com)
-PROXY_PORT=8080                            # Java proxy port (default: 8080)
+HTTP_PROXY=http://proxy.corp.example.com:3128   # Docker daemon + curl (image pulls, Maven downloads)
+HTTPS_PROXY=http://proxy.corp.example.com:3128  # Same as HTTP_PROXY for HTTPS endpoints
+NO_PROXY=localhost,127.0.0.1,169.254.169.254    # Bypass proxy for local/metadata traffic
+PROXY_HOST=proxy.corp.example.com               # Java proxy host for confluent-hub install
+PROXY_PORT=3128                                 # Java proxy port
 ```
+
+**To disable proxy (nodes have direct internet access):** Leave all five proxy vars empty:
+```
+HTTP_PROXY=
+HTTPS_PROXY=
+NO_PROXY=localhost,127.0.0.1,169.254.169.254
+PROXY_HOST=
+PROXY_PORT=8080
+```
+When empty, no Docker daemon proxy is configured (`3-setup-ec2.sh` skips the systemd drop-in), no build args are passed to Docker build, and `JAVA_TOOL_OPTIONS` is not set in the Connect image.
 
 **Why two sets of proxy vars?** `confluent-hub install` is a Java application that ignores `HTTP_PROXY`/`HTTPS_PROXY` env vars. It requires JVM system properties (`-Dhttps.proxyHost`) passed via `JAVA_TOOL_OPTIONS`. The Dockerfile handles this automatically — just set `PROXY_HOST` and `PROXY_PORT` in `.env`.
 
-Leave all proxy vars empty if nodes have direct internet access.
+**Where proxy is applied (4 layers):**
+
+| Layer | What Uses It | Configured By |
+|-------|-------------|---------------|
+| Docker daemon | Image pulls (`docker pull`) | `3-setup-ec2.sh` → systemd drop-in |
+| Docker build (curl) | `curl` downloads in Dockerfile (Maven JARs) | `HTTP_PROXY`/`HTTPS_PROXY` build args |
+| Docker build (Java) | `confluent-hub install` | `JAVA_TOOL_OPTIONS` via `PROXY_HOST`/`PROXY_PORT` |
+| Container runtime | Confluent license checks, telemetry | `HTTP_PROXY`/`HTTPS_PROXY` env vars in `docker-compose.yml` |
 
 ### Performance Tuning (Snapshot Profile)
 ```
