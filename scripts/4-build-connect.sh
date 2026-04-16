@@ -35,7 +35,6 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
     echo "[*] Phase 4 (local): Building custom Connect image..."
     echo "[*] Building image (this may take 5-10 minutes)..."
 
-    export HTTP_PROXY HTTPS_PROXY NO_PROXY
     DOCKER_BUILDKIT=0 docker compose -f docker-compose.connect-build.yml build
 
     echo ""
@@ -79,7 +78,7 @@ cmd_json=$(cat <<'EOF'
 {
   "commands": [
     "cd /home/ec2-user/cdc-on-ec2-docker",
-    "source .env && export HTTP_PROXY HTTPS_PROXY NO_PROXY && DOCKER_BUILDKIT=0 docker compose -f docker-compose.connect-build.yml build",
+    "source .env && DOCKER_BUILDKIT=0 docker compose -f docker-compose.connect-build.yml build",
     "docker images | grep cdc-connect"
   ]
 }

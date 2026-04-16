@@ -1,46 +1,50 @@
 ARG CP_VERSION=8.0.0
 FROM confluentinc/cp-server-connect:${CP_VERSION}
 
-# Debezium 3.x required for CP 8.0.0 (kafka-clients 4.0 removed KafkaConsumer.poll(long)
-# which Debezium 2.x relied on — causes NoSuchMethodError at runtime).
-ARG DEBEZIUM_HUB_VERSION=3.2.6
+# ============================================================
+# All connector plugins and dependencies are pre-downloaded in
+# connect/plugins/ — no internet required during build.
+#
+# To update versions, download new artifacts into connect/plugins/
+# and update the filenames below. See connect/plugins/README.md.
+# ============================================================
+
 ARG DEBEZIUM_VERSION=3.2.6.Final
 
-# Install Debezium SQL Server Source connector
-RUN confluent-hub install --no-prompt debezium/debezium-connector-sqlserver:${DEBEZIUM_HUB_VERSION}
+# --- Debezium SQL Server Source connector ---
+COPY connect/plugins/debezium-connector-sqlserver-${DEBEZIUM_VERSION}-plugin.tar.gz /tmp/
+RUN tar -xzf /tmp/debezium-connector-sqlserver-${DEBEZIUM_VERSION}-plugin.tar.gz \
+      -C /usr/share/confluent-hub-components/ && \
+    rm -f /tmp/debezium-connector-sqlserver-${DEBEZIUM_VERSION}-plugin.tar.gz
 
-# Install Debezium PostgreSQL Source connector
-RUN confluent-hub install --no-prompt debezium/debezium-connector-postgresql:${DEBEZIUM_HUB_VERSION}
+# --- Debezium PostgreSQL Source connector ---
+COPY connect/plugins/debezium-connector-postgres-${DEBEZIUM_VERSION}-plugin.tar.gz /tmp/
+RUN tar -xzf /tmp/debezium-connector-postgres-${DEBEZIUM_VERSION}-plugin.tar.gz \
+      -C /usr/share/confluent-hub-components/ && \
+    rm -f /tmp/debezium-connector-postgres-${DEBEZIUM_VERSION}-plugin.tar.gz
 
-# Install Debezium JDBC Sink connector from Maven Central (not on Confluent Hub).
-# Replaces Confluent's kafka-connect-jdbc which is incompatible with CP 8.0.0
-# (Utils.mkSet removed in Kafka 3.8). Debezium JDBC Sink handles CDC envelopes
-# natively and shares debezium-core classloader for SMTs.
-RUN curl -fsSL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-jdbc/${DEBEZIUM_VERSION}/debezium-connector-jdbc-${DEBEZIUM_VERSION}-plugin.tar.gz" \
-      -o /tmp/debezium-jdbc.tar.gz && \
-    tar -xzf /tmp/debezium-jdbc.tar.gz -C /usr/share/confluent-hub-components/ && \
-    rm -f /tmp/debezium-jdbc.tar.gz
+# --- Debezium JDBC Sink connector ---
+COPY connect/plugins/debezium-connector-jdbc-${DEBEZIUM_VERSION}-plugin.tar.gz /tmp/
+RUN tar -xzf /tmp/debezium-connector-jdbc-${DEBEZIUM_VERSION}-plugin.tar.gz \
+      -C /usr/share/confluent-hub-components/ && \
+    rm -f /tmp/debezium-connector-jdbc-${DEBEZIUM_VERSION}-plugin.tar.gz
 
-# Install Debezium scripting support (Groovy-based Filter SMT for loop prevention).
-# Not available on Confluent Hub — download from Maven Central.
-#
-# Kafka Connect uses per-plugin classloaders — each connector can only see JARs in
-# its own plugin directory. Scripting JARs must be copied into every connector that
-# uses the Filter SMT.
-RUN curl -fsSL "https://repo1.maven.org/maven2/io/debezium/debezium-scripting/${DEBEZIUM_VERSION}/debezium-scripting-${DEBEZIUM_VERSION}.jar" \
-      -o /tmp/debezium-scripting.jar && \
-    curl -fsSL "https://repo1.maven.org/maven2/org/apache/groovy/groovy/4.0.26/groovy-4.0.26.jar" \
-      -o /tmp/groovy.jar && \
-    curl -fsSL "https://repo1.maven.org/maven2/org/apache/groovy/groovy-jsr223/4.0.26/groovy-jsr223-4.0.26.jar" \
-      -o /tmp/groovy-jsr223.jar && \
-    for dir in \
-      /usr/share/confluent-hub-components/debezium-debezium-connector-sqlserver/lib \
-      /usr/share/confluent-hub-components/debezium-debezium-connector-postgresql/lib \
+# --- Debezium scripting support (Groovy-based Filter SMT for loop prevention) ---
+# Kafka Connect uses per-plugin classloaders — scripting JARs must be copied
+# into every connector that uses the Filter SMT.
+COPY connect/plugins/debezium-scripting-${DEBEZIUM_VERSION}.jar /tmp/
+COPY connect/plugins/groovy-4.0.26.jar /tmp/
+COPY connect/plugins/groovy-jsr223-4.0.26.jar /tmp/
+RUN for dir in \
+      /usr/share/confluent-hub-components/debezium-connector-sqlserver \
+      /usr/share/confluent-hub-components/debezium-connector-postgres \
       /usr/share/confluent-hub-components/debezium-connector-jdbc; do \
-        cp /tmp/debezium-scripting.jar /tmp/groovy.jar /tmp/groovy-jsr223.jar "$dir/"; \
+        cp /tmp/debezium-scripting-${DEBEZIUM_VERSION}.jar \
+           /tmp/groovy-4.0.26.jar \
+           /tmp/groovy-jsr223-4.0.26.jar \
+           "$dir/"; \
     done && \
-    rm -f /tmp/debezium-scripting.jar /tmp/groovy.jar /tmp/groovy-jsr223.jar
+    rm -f /tmp/debezium-scripting-*.jar /tmp/groovy*.jar
 
-# Copy the Microsoft SQL Server JDBC driver (not bundled with Confluent or Debezium).
-# Download mssql-jdbc-12.4.2.jre11.jar from Microsoft and place it in connect/jars/ before building.
+# --- Microsoft SQL Server JDBC driver (required for JDBC Sink to write to SQL Server) ---
 COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
