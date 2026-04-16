@@ -76,7 +76,7 @@ graph TB
 ```
 
 <details>
-<summary><strong>Infrastructure Requirements</strong></summary>
+<summary><strong>EC2 Requirements</strong> <i>(expand for sizing details)</i></summary>
 
 | Role | vCPU | RAM | Storage | Purpose |
 |------|------|-----|---------|---------|
