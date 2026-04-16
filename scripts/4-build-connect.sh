@@ -52,7 +52,7 @@ cmd_json=$(cat <<'EOF'
 {
   "commands": [
     "cd /home/ec2-user/cdc-on-ec2-docker",
-    "DOCKER_BUILDKIT=0 docker compose -f docker-compose.connect-build.yml build",
+    "source .env && export HTTP_PROXY HTTPS_PROXY NO_PROXY && DOCKER_BUILDKIT=0 docker compose -f docker-compose.connect-build.yml build",
     "docker images | grep cdc-connect"
   ]
 }

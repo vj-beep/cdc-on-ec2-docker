@@ -182,6 +182,35 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 1b. Configure Docker proxy (if HTTP_PROXY or HTTPS_PROXY set in .env)
+# ---------------------------------------------------------------------------
+_HTTP_PROXY=""
+_HTTPS_PROXY=""
+_NO_PROXY="localhost,127.0.0.1,169.254.169.254"
+if [[ -f .env ]]; then
+    _HTTP_PROXY=$(grep "^HTTP_PROXY=" .env | cut -d= -f2- || true)
+    _HTTPS_PROXY=$(grep "^HTTPS_PROXY=" .env | cut -d= -f2- || true)
+    _NO_PROXY=$(grep "^NO_PROXY=" .env | cut -d= -f2- || true)
+    [[ -z "$_NO_PROXY" ]] && _NO_PROXY="localhost,127.0.0.1,169.254.169.254"
+fi
+
+if [[ -n "$_HTTP_PROXY" || -n "$_HTTPS_PROXY" ]]; then
+    info "Configuring Docker daemon proxy..."
+    mkdir -p /etc/systemd/system/docker.service.d
+    cat > /etc/systemd/system/docker.service.d/http-proxy.conf <<PROXYEOF
+[Service]
+Environment="HTTP_PROXY=${_HTTP_PROXY}"
+Environment="HTTPS_PROXY=${_HTTPS_PROXY}"
+Environment="NO_PROXY=${_NO_PROXY}"
+PROXYEOF
+    systemctl daemon-reload
+    systemctl restart docker
+    SUMMARY+=("Configured Docker daemon proxy (${_HTTPS_PROXY:-$_HTTP_PROXY})")
+else
+    info "No HTTP_PROXY/HTTPS_PROXY set — skipping Docker proxy configuration."
+fi
+
+# ---------------------------------------------------------------------------
 # 2. Install Docker Compose plugin
 # ---------------------------------------------------------------------------
 info "Installing Docker Compose plugin..."
