@@ -6,6 +6,13 @@ FROM confluentinc/cp-server-connect:${CP_VERSION}
 ARG DEBEZIUM_HUB_VERSION=3.2.6
 ARG DEBEZIUM_VERSION=3.2.6.Final
 
+# Java proxy for confluent-hub install (Java ignores HTTP_PROXY/HTTPS_PROXY env vars).
+# JAVA_TOOL_OPTIONS is the officially supported JVM mechanism (JVMTI spec).
+# curl uses HTTP_PROXY/HTTPS_PROXY automatically (passed as Docker build args).
+ARG PROXY_HOST
+ARG PROXY_PORT=8080
+ENV JAVA_TOOL_OPTIONS=${PROXY_HOST:+"-Dhttp.proxyHost=${PROXY_HOST} -Dhttp.proxyPort=${PROXY_PORT} -Dhttps.proxyHost=${PROXY_HOST} -Dhttps.proxyPort=${PROXY_PORT}"}
+
 # Install Debezium SQL Server Source connector
 RUN confluent-hub install --no-prompt debezium/debezium-connector-sqlserver:${DEBEZIUM_HUB_VERSION}
 
@@ -40,6 +47,9 @@ RUN curl -fsSL "https://repo1.maven.org/maven2/io/debezium/debezium-scripting/${
         cp /tmp/debezium-scripting.jar /tmp/groovy.jar /tmp/groovy-jsr223.jar "$dir/"; \
     done && \
     rm -f /tmp/debezium-scripting.jar /tmp/groovy.jar /tmp/groovy-jsr223.jar
+
+# Clear proxy so it does not leak into Connect workers at runtime
+ENV JAVA_TOOL_OPTIONS=
 
 # Copy the Microsoft SQL Server JDBC driver (not bundled with Confluent or Debezium).
 # Download mssql-jdbc-12.4.2.jre11.jar from Microsoft and place it in connect/jars/ before building.
