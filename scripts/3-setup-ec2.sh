@@ -130,6 +130,21 @@ fi
 SUMMARY=()
 
 # ---------------------------------------------------------------------------
+# 0a. Set proxy env vars for dnf/curl (before any package installs)
+# ---------------------------------------------------------------------------
+if [[ -f .env ]]; then
+    _P=$(grep "^HTTP_PROXY=" .env | cut -d= -f2- || true)
+    if [[ -n "$_P" ]]; then
+        export HTTP_PROXY="$_P" http_proxy="$_P"
+        export HTTPS_PROXY="$(grep "^HTTPS_PROXY=" .env | cut -d= -f2- || true)"
+        export https_proxy="${HTTPS_PROXY}"
+        export NO_PROXY="$(grep "^NO_PROXY=" .env | cut -d= -f2- || true)"
+        export no_proxy="${NO_PROXY}"
+        info "Proxy configured for package installs: ${HTTPS_PROXY}"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # 0. Pre-flight: fix broken Docker daemon.json if present
 # ---------------------------------------------------------------------------
 # AL2023's Docker systemd unit passes --default-ulimit nofile=32768:65536.

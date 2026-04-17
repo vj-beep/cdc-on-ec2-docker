@@ -56,26 +56,28 @@ deploy_to_node() {
     local deploy_user="${DEPLOY_USER:-ec2-user}"
     local deploy_dir="${DEPLOY_DIR:-/home/${deploy_user}/cdc-on-ec2-docker}"
     local deploy_home=$(dirname "$deploy_dir")
-    local proxy_cmds=""
+    local proxy_cmd="true"
     if [[ -n "${HTTP_PROXY:-}" ]]; then
-        proxy_cmds="export HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY}"
+        proxy_cmd="export HTTP_PROXY='${HTTP_PROXY}' HTTPS_PROXY='${HTTPS_PROXY}' NO_PROXY='${NO_PROXY}' http_proxy='${HTTP_PROXY}' https_proxy='${HTTPS_PROXY}' no_proxy='${NO_PROXY}'"
     fi
     local cmd_json
-    cmd_json=$(cat <<CMDJSON
-{
-  "commands": [
-    "${proxy_cmds:-true}",
-    "which git >/dev/null 2>&1 || dnf install -y git",
-    "mkdir -p $deploy_home",
-    "cd $deploy_home",
-    "rm -rf $(basename $deploy_dir) 2>/dev/null || true",
-    "git clone $repo_url $(basename $deploy_dir)",
-    "chown -R ${deploy_user}:${deploy_user} $deploy_dir",
-    "ls -lh $deploy_dir/docker-compose.yml"
-  ]
-}
-CMDJSON
-)
+    cmd_json=$(jq -n --arg proxy "$proxy_cmd" \
+        --arg deploy_home "$deploy_home" \
+        --arg dirname "$(basename "$deploy_dir")" \
+        --arg repo "$repo_url" \
+        --arg user "$deploy_user" \
+        --arg dir "$deploy_dir" \
+        '{commands: [
+            $proxy,
+            "which git >/dev/null 2>&1 || dnf install -y git",
+            ("mkdir -p " + $deploy_home),
+            ("cd " + $deploy_home),
+            ("rm -rf " + $dirname + " 2>/dev/null || true"),
+            ("git clone " + $repo + " " + $dirname),
+            ("chown -R " + $user + ":" + $user + " " + $dir),
+            ("ls -lh " + $dir + "/docker-compose.yml")
+        ]}'
+    )
 
     # Deploy via SSM Session Manager
     local cmd_id
@@ -94,8 +96,8 @@ CMDJSON
 
     echo "   ⏱️  Command ID: $cmd_id (polling for completion...)"
 
-    # Poll for completion (up to 3 minutes)
-    local timeout=180
+    # Poll for completion (up to 5 minutes — dnf install through proxy can be slow)
+    local timeout=300
     local elapsed=0
     local status="InProgress"
 
