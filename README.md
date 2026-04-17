@@ -46,7 +46,7 @@ graph TB
         FK_JM["Apache Flink® JobManager"]
         FK_TM["Apache Flink® TaskManager"]
         PR["Prometheus :9090"]
-        GR["Grafana :8080"]
+        GR["Grafana :3000"]
         AM["Alertmanager"]
         NE["Node Exporter"]
         CV["cAdvisor"]
@@ -315,7 +315,7 @@ Once all 4 steps are complete, proceed to [README-DEPLOYMENT.md](README-DEPLOYME
 
 ### Access Points
 
-- **Grafana:** `http://localhost:8080` (via SSM port forward to Node 5)
+- **Grafana:** `http://localhost:3000` (via SSM port forward to Node 5)
 - **Control Center:** `http://localhost:9021`
 - **ksqlDB:** `http://localhost:8088`
 - **Connect REST:** `http://localhost:8083`

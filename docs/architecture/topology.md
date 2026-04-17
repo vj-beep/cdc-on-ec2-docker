@@ -10,7 +10,7 @@ Five EC2 instances, each running a specific subset of the Confluent Platform sta
 | **Node 2** | Broker 2 | Kafka broker (KRaft Controller), node-exporter, cAdvisor | 9092, 9093, 9100, 9080, 9404 |
 | **Node 3** | Broker 3 | Kafka broker (KRaft Controller), node-exporter, cAdvisor | 9092, 9093, 9100, 9080, 9404 |
 | **Node 4** | Connect | Connect Worker 1 (forward :8083), Connect Worker 2 (reverse :8084), Schema Registry, node-exporter, cAdvisor | 8083, 8084, 8081, 9100, 9080, 9404, 9405, 9406 |
-| **Node 5** | Monitor | Control Center, ksqlDB, REST Proxy, Apache Flink®, Prometheus, Grafana, Alertmanager, node-exporter, cAdvisor | 9021, 8088, 8082, 8081, 9090, 8080, 9093, 9100, 9080 |
+| **Node 5** | Monitor | Control Center, ksqlDB, REST Proxy, Apache Flink®, Prometheus, Grafana, Alertmanager, node-exporter, cAdvisor | 9021, 8088, 8082, 8081, 9090, 3000, 9093, 9100, 9080 |
 
 ## Design Rationale
 

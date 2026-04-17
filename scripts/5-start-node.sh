@@ -216,7 +216,7 @@ case $NODE in
     echo "✅ Monitoring stack started"
     echo ""
     echo "Access points:"
-    echo "  • Grafana: http://localhost:8080"
+    echo "  • Grafana: http://localhost:3000"
     echo "  • Prometheus: http://localhost:9090"
     echo "  • Control Center: http://localhost:9021"
     echo "  • ksqlDB: http://localhost:8088"

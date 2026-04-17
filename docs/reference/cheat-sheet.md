@@ -113,7 +113,7 @@ docker compose -f docker-compose.yml -f docker-compose.ksqldb-monitoring.yml \
 
 | Service | URL |
 |---------|-----|
-| Grafana | `http://localhost:8080` |
+| Grafana | `http://localhost:3000` |
 | Control Center | `http://localhost:9021` |
 | Connect REST (forward) | `http://localhost:8083` |
 | Connect REST (reverse) | `http://localhost:8084` |

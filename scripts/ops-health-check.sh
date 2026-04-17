@@ -99,7 +99,7 @@ check_local() {
   check_http "http://localhost:9090/-/healthy" "Prometheus" || true
 
   # Grafana (optional)
-  GRAFANA_PORT="${GRAFANA_PORT:-8080}"
+  GRAFANA_PORT="${GRAFANA_PORT:-3000}"
   check_http "http://localhost:${GRAFANA_PORT}/api/health" "Grafana" || true
 }
 

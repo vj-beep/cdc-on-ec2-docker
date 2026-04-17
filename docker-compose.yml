@@ -358,7 +358,7 @@ services:
       - --web.listen-address=:${PROMETHEUS_PORT}
 
   # ===========================================================
-  # Grafana (Node 5 — port 8080 for Cloud9 preview)
+  # Grafana (Node 5 — port 3000; must not use 8080 which CC next-gen CMF needs)
   # ===========================================================
   grafana:
     image: grafana/grafana:${GRAFANA_VERSION:-11.6.0}
@@ -410,7 +410,7 @@ services:
       - /var/lib/node_exporter/textfile_collector:/textfile:ro
 
   # ===========================================================
-  # cAdvisor (all nodes — port 9080 to avoid Grafana 8080 conflict)
+  # cAdvisor (all nodes — port 9080)
   # ===========================================================
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:${CADVISOR_VERSION:-v0.52.1}
