@@ -1,23 +1,26 @@
 #!/bin/bash
 # ============================================================
-# Phase 2a: Deploy public repo to all EC2 nodes via AWS SSM
+# Phase 2a: Deploy public repo to all EC2 nodes
 # ============================================================
-# Clones the public repo to all 5 EC2 nodes via SSM.
-# Works for private EC2 instances without SSH key distribution.
+# Clones the public repo to all 5 EC2 nodes.
 #
 # Run BEFORE 2b-distribute-env.sh — repo directory must exist
 # before .env can be copied into it.
 #
-# Usage:
+# Usage (SSM mode — dispatches to all nodes from control machine):
 #   ./scripts/2a-deploy-repo.sh
+#
+# Usage (SSH mode — run on each node after SSH-ing in):
+#   ./scripts/2a-deploy-repo.sh --local
 #
 # Prerequisites:
 #   1. .env file populated with:
 #      - BROKER_1_IP, BROKER_2_IP, BROKER_3_IP
 #      - CONNECT_1_IP, MONITOR_1_IP
 #      - PUBLIC_REPO_URL
-#   2. AWS CLI configured with credentials
-#   3. EC2 instances have SSM agent + IAM role (created by Terraform)
+#      - DISPATCH_MODE (ssm or ssh)
+#   2. SSM mode: AWS CLI configured, EC2 instances have SSM agent + IAM role
+#   3. SSH mode: SSH into each node and run with --local
 # ============================================================
 
 set -e
@@ -36,7 +39,42 @@ fi
 # Source .env to get node IPs and repo URL
 source "$ENV_FILE"
 
-# Verify required variables
+DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
+
+# ---------------------------------------------------------------------------
+# --local mode: clone repo on this node only (SSH mode — run per node)
+# ---------------------------------------------------------------------------
+if [[ "${1:-}" == "--local" ]]; then
+    deploy_user="${DEPLOY_USER:-ec2-user}"
+    deploy_dir="${DEPLOY_DIR:-/home/${deploy_user}/cdc-on-ec2-docker}"
+    deploy_home="$(dirname "$deploy_dir")"
+    repo_url="${PUBLIC_REPO_URL:-}"
+
+    if [[ -z "$repo_url" ]]; then
+        echo "❌ ERROR: PUBLIC_REPO_URL not set in .env"
+        exit 1
+    fi
+
+    echo "[*] Phase 2a (local): Cloning repo on $(hostname)..."
+
+    # Export proxy for git and dnf
+    if [[ -n "${HTTP_PROXY:-}" ]]; then
+        export HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}"
+    fi
+
+    which git >/dev/null 2>&1 || dnf install -y git
+    mkdir -p "$deploy_home"
+    rm -rf "$deploy_dir" 2>/dev/null || true
+    git clone "$repo_url" "$deploy_dir"
+    chown -R "${deploy_user}:${deploy_user}" "$deploy_dir"
+    ls -lh "$deploy_dir/docker-compose.yml"
+    echo "✅ Repo cloned to $deploy_dir"
+    echo ""
+    echo "Next: copy .env into $deploy_dir/.env (run 2b-distribute-env.sh from control machine, or scp manually)"
+    exit 0
+fi
+
+# Verify required variables for SSM dispatch
 for var in BROKER_1_INSTANCE_ID BROKER_2_INSTANCE_ID BROKER_3_INSTANCE_ID CONNECT_1_INSTANCE_ID MONITOR_1_INSTANCE_ID PUBLIC_REPO_URL; do
     if [[ -z "${!var}" ]]; then
         echo "❌ ERROR: $var is not set in .env"

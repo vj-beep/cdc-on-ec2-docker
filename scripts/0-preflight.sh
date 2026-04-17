@@ -39,6 +39,9 @@ error() { echo -e "${RED}[ERROR]${NC} $*"; }
 echo "[*] Phase 0: Pre-flight Audit"
 echo ""
 
+# Determine dispatch mode
+DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
+
 # Check 1: AWS CLI
 info "Checking AWS CLI..."
 if ! command -v aws &>/dev/null; then
@@ -74,12 +77,28 @@ info ".env syntax valid"
 # Check 5: Required .env variables
 info "Checking required .env variables..."
 source "$ENV_FILE"
-for var in BROKER_1_IP BROKER_2_IP BROKER_3_IP CONNECT_1_IP MONITOR_1_IP BROKER_1_INSTANCE_ID BROKER_2_INSTANCE_ID BROKER_3_INSTANCE_ID CONNECT_1_INSTANCE_ID MONITOR_1_INSTANCE_ID PUBLIC_REPO_URL AURORA_HOST SQLSERVER_HOST; do
+DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
+for var in BROKER_1_IP BROKER_2_IP BROKER_3_IP CONNECT_1_IP MONITOR_1_IP PUBLIC_REPO_URL AURORA_HOST SQLSERVER_HOST; do
     if [[ -z "${!var}" ]]; then
         error "$var not set in .env"
         exit 1
     fi
 done
+# Instance IDs only required for SSM dispatch
+if [[ "$DISPATCH_MODE" == "ssm" ]]; then
+    for var in BROKER_1_INSTANCE_ID BROKER_2_INSTANCE_ID BROKER_3_INSTANCE_ID CONNECT_1_INSTANCE_ID MONITOR_1_INSTANCE_ID; do
+        if [[ -z "${!var}" ]]; then
+            error "$var not set in .env (required for DISPATCH_MODE=ssm)"
+            exit 1
+        fi
+    done
+else
+    for var in BROKER_1_INSTANCE_ID BROKER_2_INSTANCE_ID BROKER_3_INSTANCE_ID CONNECT_1_INSTANCE_ID MONITOR_1_INSTANCE_ID; do
+        if [[ -z "${!var}" ]]; then
+            warn "$var not set (not required for DISPATCH_MODE=ssh)"
+        fi
+    done
+fi
 info "All required variables set"
 
 # Check 6: EC2 instances (verify POC-specific nodes by IP)
@@ -104,33 +123,63 @@ if [[ $poc_running -lt 5 ]]; then
 fi
 info "EC2: $poc_running/5 deployment instances running ✓"
 
-# Check 7: Network connectivity to nodes
-info "Checking SSM connectivity to nodes..."
-declare -A NODES=([broker1]="$BROKER_1_IP" [broker2]="$BROKER_2_IP" [broker3]="$BROKER_3_IP" [connect]="$CONNECT_1_IP" [monitor]="$MONITOR_1_IP")
-
-get_instance_id_by_ip() {
-    aws ec2 describe-instances \
-        --region "$AWS_REGION" \
-        --filters "Name=private-ip-address,Values=$1" "Name=instance-state-name,Values=running" \
-        --query 'Reservations[0].Instances[0].InstanceId' \
-        --output text 2>/dev/null
-}
-
-failed=0
-for node_name in "${!NODES[@]}"; do
-    node_ip="${NODES[$node_name]}"
-    instance_id=$(get_instance_id_by_ip "$node_ip")
-    if [[ -z "$instance_id" || "$instance_id" == "None" ]]; then
-        error "Cannot find instance with IP $node_ip"
-        failed=$((failed + 1))
-    else
-        info "$node_name: $instance_id reachable"
+# Check 7: Node reachability
+if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+    info "Checking SSH connectivity to nodes (DISPATCH_MODE=ssh)..."
+    SSH_KEY_PATH="${SSH_KEY_PATH:-}"
+    if [[ -z "$SSH_KEY_PATH" ]]; then
+        error "SSH_KEY_PATH not set in .env (required for DISPATCH_MODE=ssh)"
+        exit 1
     fi
-done
+    if [[ ! -f "$SSH_KEY_PATH" ]]; then
+        error "SSH key not found: $SSH_KEY_PATH"
+        exit 1
+    fi
+    DEPLOY_USER="${DEPLOY_USER:-ec2-user}"
+    failed=0
+    declare -A SSH_NODES=([broker1]="$BROKER_1_IP" [broker2]="$BROKER_2_IP" [broker3]="$BROKER_3_IP" [connect]="$CONNECT_1_IP" [monitor]="$MONITOR_1_IP")
+    for node_name in "${!SSH_NODES[@]}"; do
+        node_ip="${SSH_NODES[$node_name]}"
+        if ssh -i "$SSH_KEY_PATH" -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+               "$DEPLOY_USER@$node_ip" "echo ok" &>/dev/null; then
+            info "$node_name ($node_ip): SSH reachable"
+        else
+            error "$node_name ($node_ip): SSH not reachable"
+            failed=$((failed + 1))
+        fi
+    done
+    if [[ $failed -gt 0 ]]; then
+        error "$failed nodes unreachable via SSH"
+        exit 1
+    fi
+else
+    info "Checking node instances by private IP (DISPATCH_MODE=ssm)..."
+    declare -A NODES=([broker1]="$BROKER_1_IP" [broker2]="$BROKER_2_IP" [broker3]="$BROKER_3_IP" [connect]="$CONNECT_1_IP" [monitor]="$MONITOR_1_IP")
 
-if [[ $failed -gt 0 ]]; then
-    error "$failed nodes unreachable via SSM"
-    exit 1
+    get_instance_id_by_ip() {
+        aws ec2 describe-instances \
+            --region "$AWS_REGION" \
+            --filters "Name=private-ip-address,Values=$1" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text 2>/dev/null
+    }
+
+    failed=0
+    for node_name in "${!NODES[@]}"; do
+        node_ip="${NODES[$node_name]}"
+        instance_id=$(get_instance_id_by_ip "$node_ip")
+        if [[ -z "$instance_id" || "$instance_id" == "None" ]]; then
+            error "Cannot find running instance with IP $node_ip"
+            failed=$((failed + 1))
+        else
+            info "$node_name: $instance_id reachable"
+        fi
+    done
+
+    if [[ $failed -gt 0 ]]; then
+        error "$failed nodes not found via AWS API"
+        exit 1
+    fi
 fi
 
 # Check 8: RDS databases (infrastructure-agnostic)

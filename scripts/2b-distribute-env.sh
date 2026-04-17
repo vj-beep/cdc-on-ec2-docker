@@ -1,19 +1,23 @@
 #!/bin/bash
 # ============================================================
-# Phase 2b: Distribute .env to all EC2 nodes via AWS SSM
+# Phase 2b: Distribute .env to all EC2 nodes
 # ============================================================
 # Copies the .env configuration file to all 5 EC2 nodes.
 # Run AFTER 2a-deploy-repo.sh — repo directory must already
 # exist on each node so .env lands in the right place.
 #
-# Usage:
+# Usage (SSM mode — default):
 #   ./scripts/2b-distribute-env.sh
+#
+# Usage (SSH mode — set DISPATCH_MODE=ssh in .env):
+#   ./scripts/2b-distribute-env.sh
+#   (uses scp with SSH_KEY_PATH to copy .env to each node)
 #
 # Prerequisites:
 #   1. Phase 2a completed (repo cloned to all nodes)
 #   2. .env file populated with all required variables (run Phase 1 first)
-#   3. AWS CLI configured with credentials
-#   4. EC2 instances have SSM agent + IAM role (created by Terraform)
+#   3. SSM mode: AWS CLI configured, EC2 instances have SSM agent + IAM role
+#   4. SSH mode: SSH_KEY_PATH set in .env, key authorised on all nodes
 # ============================================================
 
 set -e
@@ -21,6 +25,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
 AWS_REGION=${AWS_REGION:-us-east-1}
+DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -40,40 +45,58 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 
-# Source .env to get node IPs
+# Source .env to get node IPs and dispatch config
 source "$ENV_FILE"
+DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
 
-# Verify required variables
-for var in BROKER_1_INSTANCE_ID BROKER_2_INSTANCE_ID BROKER_3_INSTANCE_ID CONNECT_1_INSTANCE_ID MONITOR_1_INSTANCE_ID; do
-    if [[ -z "${!var}" ]]; then
-        error "$var not set in .env (required for SSM)"
-        exit 1
-    fi
-done
+# Build node map: name -> IP or instance ID depending on mode
+DEPLOY_USER="${DEPLOY_USER:-ec2-user}"
+DEPLOY_DIR="${DEPLOY_DIR:-/home/${DEPLOY_USER}/cdc-on-ec2-docker}"
 
-echo "[*] Phase 2b: Distribute .env to all 5 EC2 nodes"
+echo "[*] Phase 2b: Distribute .env to all 5 EC2 nodes (DISPATCH_MODE=$DISPATCH_MODE)"
 echo ""
 
-# Helper: Distribute .env to a single node via SSM
-distribute_to_node() {
+# ---------------------------------------------------------------------------
+# SSH dispatch: scp .env to each node
+# ---------------------------------------------------------------------------
+distribute_ssh() {
+    local node_name="$1"
+    local node_ip="$2"
+    local ssh_key="$3"
+
+    info "Distributing .env to $node_name ($node_ip) via scp..."
+
+    if scp -i "$ssh_key" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+           "$ENV_FILE" "${DEPLOY_USER}@${node_ip}:${DEPLOY_DIR}/.env" 2>/dev/null; then
+        # Set permissions via ssh
+        ssh -i "$ssh_key" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            "${DEPLOY_USER}@${node_ip}" "chmod 600 ${DEPLOY_DIR}/.env" 2>/dev/null
+        success "$node_name: .env distributed"
+        return 0
+    else
+        error "$node_name ($node_ip): scp failed"
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# SSM dispatch: base64-encode .env and write via send-command
+# ---------------------------------------------------------------------------
+distribute_ssm() {
     local node_name="$1"
     local instance_id="$2"
 
-    info "Distributing .env to $node_name ($instance_id)..."
+    info "Distributing .env to $node_name ($instance_id) via SSM..."
 
-    # Copy .env via SSM send-command
-    # Using base64 encoding to safely pass the file content
     local env_b64
     env_b64=$(base64 -w 0 < "$ENV_FILE")
 
-    # SSM command: decode base64 and write to .env
-    # Use double-quoted JSON to allow variable expansion
     local cmd_id
     cmd_id=$(aws ssm send-command \
         --region "$AWS_REGION" \
         --instance-ids "$instance_id" \
         --document-name "AWS-RunShellScript" \
-        --parameters "commands=[\"mkdir -p /home/ec2-user/cdc-on-ec2-docker\",\"echo '$env_b64' | base64 -d > /home/ec2-user/cdc-on-ec2-docker/.env\",\"chmod 600 /home/ec2-user/cdc-on-ec2-docker/.env\",\"chown ec2-user:ec2-user /home/ec2-user/cdc-on-ec2-docker/.env\",\"ls -lh /home/ec2-user/cdc-on-ec2-docker/.env\"]" \
+        --parameters "commands=[\"mkdir -p ${DEPLOY_DIR}\",\"echo '$env_b64' | base64 -d > ${DEPLOY_DIR}/.env\",\"chmod 600 ${DEPLOY_DIR}/.env\",\"chown ${DEPLOY_USER}:${DEPLOY_USER} ${DEPLOY_DIR}/.env\",\"ls -lh ${DEPLOY_DIR}/.env\"]" \
         --query 'Command.CommandId' \
         --output text 2>/dev/null)
 
@@ -82,7 +105,6 @@ distribute_to_node() {
         return 1
     fi
 
-    # Poll for completion (up to 2 minutes)
     local timeout=120
     local elapsed=0
     local status="InProgress"
@@ -90,7 +112,6 @@ distribute_to_node() {
     while [[ ("$status" == "InProgress" || "$status" == "Pending") && $elapsed -lt $timeout ]]; do
         sleep 3
         elapsed=$((elapsed + 3))
-
         status=$(aws ssm get-command-invocation \
             --region "$AWS_REGION" \
             --command-id "$cmd_id" \
@@ -104,7 +125,6 @@ distribute_to_node() {
         return 0
     elif [[ "$status" == "Failed" ]]; then
         error "$node_name: .env distribution FAILED"
-        # Show error output for debugging
         local error_output
         error_output=$(aws ssm get-command-invocation \
             --region "$AWS_REGION" \
@@ -115,22 +135,47 @@ distribute_to_node() {
         [[ -n "$error_output" ]] && echo "   Error: $error_output"
         return 1
     else
-        warn "$node_name: deployment status $status (timeout)"
+        warn "$node_name: status $status (timeout)"
         return 1
     fi
 }
 
-# Distribute to all 5 nodes
+# ---------------------------------------------------------------------------
+# Dispatch to all 5 nodes
+# ---------------------------------------------------------------------------
 echo "📦 Distributing .env to all 5 EC2 nodes..."
 echo ""
 
 failed_nodes=()
 
-distribute_to_node "broker1" "$BROKER_1_INSTANCE_ID" || failed_nodes+=("broker1")
-distribute_to_node "broker2" "$BROKER_2_INSTANCE_ID" || failed_nodes+=("broker2")
-distribute_to_node "broker3" "$BROKER_3_INSTANCE_ID" || failed_nodes+=("broker3")
-distribute_to_node "connect1" "$CONNECT_1_INSTANCE_ID" || failed_nodes+=("connect1")
-distribute_to_node "monitor1" "$MONITOR_1_INSTANCE_ID" || failed_nodes+=("monitor1")
+if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+    SSH_KEY="${SSH_KEY_PATH:-}"
+    if [[ -z "$SSH_KEY" ]]; then
+        error "SSH_KEY_PATH not set in .env (required for DISPATCH_MODE=ssh)"
+        exit 1
+    fi
+    if [[ ! -f "$SSH_KEY" ]]; then
+        error "SSH key not found: $SSH_KEY"
+        exit 1
+    fi
+    distribute_ssh "broker1"  "$BROKER_1_IP"  "$SSH_KEY" || failed_nodes+=("broker1")
+    distribute_ssh "broker2"  "$BROKER_2_IP"  "$SSH_KEY" || failed_nodes+=("broker2")
+    distribute_ssh "broker3"  "$BROKER_3_IP"  "$SSH_KEY" || failed_nodes+=("broker3")
+    distribute_ssh "connect1" "$CONNECT_1_IP" "$SSH_KEY" || failed_nodes+=("connect1")
+    distribute_ssh "monitor1" "$MONITOR_1_IP" "$SSH_KEY" || failed_nodes+=("monitor1")
+else
+    for var in BROKER_1_INSTANCE_ID BROKER_2_INSTANCE_ID BROKER_3_INSTANCE_ID CONNECT_1_INSTANCE_ID MONITOR_1_INSTANCE_ID; do
+        if [[ -z "${!var}" ]]; then
+            error "$var not set in .env (required for DISPATCH_MODE=ssm)"
+            exit 1
+        fi
+    done
+    distribute_ssm "broker1"  "$BROKER_1_INSTANCE_ID"  || failed_nodes+=("broker1")
+    distribute_ssm "broker2"  "$BROKER_2_INSTANCE_ID"  || failed_nodes+=("broker2")
+    distribute_ssm "broker3"  "$BROKER_3_INSTANCE_ID"  || failed_nodes+=("broker3")
+    distribute_ssm "connect1" "$CONNECT_1_INSTANCE_ID" || failed_nodes+=("connect1")
+    distribute_ssm "monitor1" "$MONITOR_1_INSTANCE_ID" || failed_nodes+=("monitor1")
+fi
 
 echo ""
 if [[ ${#failed_nodes[@]} -eq 0 ]]; then

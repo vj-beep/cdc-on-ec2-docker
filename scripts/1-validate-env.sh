@@ -25,6 +25,9 @@ else
     exit 1
 fi
 
+# Determine dispatch mode — instance IDs only required for SSM
+DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
+
 # Required variables
 REQUIRED_VARS=(
     "PUBLIC_REPO_URL"
@@ -33,11 +36,6 @@ REQUIRED_VARS=(
     "BROKER_3_IP"
     "CONNECT_1_IP"
     "MONITOR_1_IP"
-    "BROKER_1_INSTANCE_ID"
-    "BROKER_2_INSTANCE_ID"
-    "BROKER_3_INSTANCE_ID"
-    "CONNECT_1_INSTANCE_ID"
-    "MONITOR_1_INSTANCE_ID"
     "AURORA_HOST"
     "AURORA_PORT"
     "AURORA_DATABASE"
@@ -53,6 +51,15 @@ REQUIRED_VARS=(
     "CP_VERSION"
     "CLUSTER_ID"
     "KAFKA_REPLICATION_FACTOR"
+)
+
+# Instance IDs only required for SSM dispatch
+INSTANCE_ID_VARS=(
+    "BROKER_1_INSTANCE_ID"
+    "BROKER_2_INSTANCE_ID"
+    "BROKER_3_INSTANCE_ID"
+    "CONNECT_1_INSTANCE_ID"
+    "MONITOR_1_INSTANCE_ID"
 )
 
 echo ""
@@ -82,10 +89,46 @@ if [[ $MISSING -gt 0 ]]; then
     echo ""
     echo "Edit .env and fill in all values:"
     echo "   vim .env"
-    echo "   ./scripts/validate-env.sh"
+    echo "   ./scripts/1-validate-env.sh"
     exit 1
 else
     echo "✅ All required variables set"
+fi
+
+# Check instance IDs — required for SSM, optional for SSH
+echo ""
+if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+    echo "ℹ️  DISPATCH_MODE=ssh — instance IDs not required (scripts use *_IP vars)"
+    for var in "${INSTANCE_ID_VARS[@]}"; do
+        if [[ -z "${!var}" ]]; then
+            echo "  ⚠️  $var = (not set — OK for ssh mode)"
+        else
+            echo "  ✅ $var = ${!var}"
+        fi
+    done
+    # Validate SSH_KEY_PATH is set
+    if [[ -z "${SSH_KEY_PATH:-}" ]]; then
+        echo "  ❌ Missing: SSH_KEY_PATH (required when DISPATCH_MODE=ssh)"
+        ((MISSING++))
+    else
+        echo "  ✅ SSH_KEY_PATH = ${SSH_KEY_PATH}"
+    fi
+else
+    echo "ℹ️  DISPATCH_MODE=ssm — validating instance IDs..."
+    for var in "${INSTANCE_ID_VARS[@]}"; do
+        if [[ -z "${!var}" ]]; then
+            echo "  ❌ Missing: $var"
+            ((MISSING++))
+        else
+            echo "  ✅ $var = ${!var}"
+        fi
+    done
+fi
+
+if [[ $MISSING -gt 0 ]]; then
+    echo ""
+    echo "❌ ERROR: $MISSING variable(s) missing after instance ID check"
+    exit 1
 fi
 
 # Advisory checks (non-blocking warnings)

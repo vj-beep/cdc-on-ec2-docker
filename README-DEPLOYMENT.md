@@ -2,16 +2,55 @@
 
 This document walks through deploying the bi-directional CDC pipeline using the numbered scripts in `scripts/`.
 
-**All scripts run from the jumpbox** (your local machine or a bastion with AWS CLI access) unless noted otherwise. Scripts use AWS SSM to reach EC2 nodes — no SSH keys required.
+## Dispatch Modes
+
+Scripts support two modes for reaching EC2 nodes. Set `DISPATCH_MODE` in `.env` before starting.
+
+### SSM mode (default — `DISPATCH_MODE=ssm`)
+
+Scripts run from **any machine with AWS CLI access** (jumpbox, bastion, local machine). Commands are dispatched to EC2 nodes via AWS Systems Manager — no SSH keys or inbound ports required.
+
+**Requirements:**
+- AWS CLI configured with credentials
+- EC2 IAM instance profile with `AmazonSSMManagedInstanceCore`
+- SSM VPC endpoints (PrivateLink) — required if nodes have no direct internet egress
+- `BROKER_*_INSTANCE_ID`, `CONNECT_1_INSTANCE_ID`, `MONITOR_1_INSTANCE_ID` set in `.env`
+
+### SSH mode (`DISPATCH_MODE=ssh`)
+
+Scripts run from **any machine with SSH access** to the nodes. Multi-node scripts dispatch via `ssh`/`scp`. Per-node scripts are run directly on each node with `--local`.
+
+**Requirements:**
+- `SSH_KEY_PATH` set in `.env` (path to private key authorised on all nodes)
+- `BROKER_*_IP`, `CONNECT_1_IP`, `MONITOR_1_IP` set in `.env` (already required)
+- Instance IDs (`*_INSTANCE_ID`) are not required in SSH mode
+
+**Per-node phase workflow (SSH mode):**
+
+| Phase | Where to run | Command |
+|-------|-------------|---------|
+| **0** | Control machine | `./scripts/0-preflight.sh` (checks SSH reachability) |
+| **1** | Control machine | `./scripts/1-validate-env.sh` |
+| **2a** | SSH into each of the 5 nodes | `bash scripts/2a-deploy-repo.sh --local` |
+| **2b** | Control machine | `./scripts/2b-distribute-env.sh` (uses scp) |
+| **3** | SSH into each node | `sudo bash scripts/3-setup-ec2.sh --local` |
+| **4** | SSH into Node 4 | `bash scripts/4-build-connect.sh --local` |
+| **5** | SSH into target node | `bash scripts/5-start-node.sh --local <node>` |
+| **6** | SSH into Node 4 | `./scripts/6-deploy-connectors.sh` |
+| **7** | SSH into Node 4 | `./scripts/7-validate-poc.sh` |
+
+> **Proxy required in both modes.** No direct internet egress is assumed — Docker pulls, `dnf` installs, and Maven downloads all route through `HTTP_PROXY`/`HTTPS_PROXY`. Set these in `.env` before deployment.
+
+---
 
 ## Overview
 
 | Phase | Script | What it does | Runtime |
 |-------|--------|--------------|---------|
-| **0** | `0-preflight.sh` | Verify AWS, nodes, databases are reachable | 2-3 min |
+| **0** | `0-preflight.sh` | Verify AWS/SSH, nodes, databases are reachable | 2-3 min |
 | **1** | `1-validate-env.sh` | Check all .env variables are set and valid | 1 min |
 | **2a** | `2a-deploy-repo.sh` | Clone this repo to all 5 EC2 nodes | 3 min |
-| **2b** | `2b-distribute-env.sh` | Copy .env to all 5 nodes via SSM | 2 min |
+| **2b** | `2b-distribute-env.sh` | Copy .env to all 5 nodes (SSM or scp) | 2 min |
 | **3** | `3-setup-ec2.sh` | Install Docker, format NVMe, kernel tuning | 5 min |
 | **4** | `4-build-connect.sh` | Build custom Connect image with Debezium + JDBC | 5-10 min |
 | **5** | `5-start-node.sh` | Start services (brokers → connect → monitor) | 1-5 min/node |
@@ -182,14 +221,21 @@ Validates:
 
 ### Phase 2a: Deploy Repository to All Nodes
 
+**SSM mode** (dispatches to all nodes automatically):
 ```bash
 ./scripts/2a-deploy-repo.sh
 ```
 
-Clones this repo to all 5 EC2 nodes via SSM:
-- Installs `git` if not present
-- Target directory: `/home/ec2-user/cdc-on-ec2-docker/`
-- If directory exists, pulls latest changes instead
+**SSH mode** (run on each node after SSH-ing in):
+```bash
+# SSH into each of the 5 nodes, then:
+bash scripts/2a-deploy-repo.sh --local
+```
+
+What it does on each node:
+- Installs `git` if not present (via proxy)
+- Clones `PUBLIC_REPO_URL` to `DEPLOY_DIR` (default: `/home/ec2-user/cdc-on-ec2-docker/`)
+- Sets correct ownership
 
 ---
 
@@ -199,25 +245,24 @@ Clones this repo to all 5 EC2 nodes via SSM:
 ./scripts/2b-distribute-env.sh
 ```
 
-Copies your local `.env` to every node:
-- Sends file content via SSM (base64-encoded)
-- Writes to `/home/ec2-user/cdc-on-ec2-docker/.env`
-- Sets permissions to `600` (owner-only read/write)
+Works in both SSM and SSH modes (reads `DISPATCH_MODE` from `.env`):
+- **SSM mode:** sends file content via SSM (base64-encoded)
+- **SSH mode:** uses `scp -i $SSH_KEY_PATH` to copy `.env` to each node
+- Writes to `DEPLOY_DIR/.env` with permissions `600` (owner-only read/write)
 
 ---
 
 ### Phase 3: Bootstrap EC2 Nodes
 
+**SSM mode** (dispatches to all 5 nodes automatically):
 ```bash
 ./scripts/3-setup-ec2.sh
 ```
 
-**Runs on each node** (the script dispatches via SSM, or run manually):
-
+**SSH mode** (run on each node after SSH-ing in):
 ```bash
-# If running manually on a node:
-cd /home/ec2-user/cdc-on-ec2-docker
-sudo bash scripts/3-setup-ec2.sh
+# SSH into each of the 5 nodes, then:
+sudo bash scripts/3-setup-ec2.sh --local
 ```
 
 What it does on each node:
@@ -457,38 +502,72 @@ Stops all containers, removes volumes, and cleans up on all nodes. Use before re
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | Phase 0: "Cannot find instance" | Instance stopped or wrong ID in .env | Check `aws ec2 describe-instances` and update .env |
+| Phase 0: "SSH not reachable" | Key wrong or SG blocks port 22 | Check `SSH_KEY_PATH` and security group inbound rules |
+| Phase 1: "SSH_KEY_PATH not set" | SSH mode but key path missing | Add `SSH_KEY_PATH=~/.ssh/id_rsa` to .env |
 | Phase 1: "Variable not set" | .env has blank values | Fill all required fields, re-run `1-validate-env.sh` |
-| Phase 2a: "git not found" | Git not installed on node | Script installs it automatically; if it fails: `yum install -y git` |
-| Phase 3: "must be run as root" | Missing sudo | Run with `sudo bash scripts/3-setup-ec2.sh` |
-| Phase 4: Build hangs | Slow Maven downloads | SSH to Node 4, check `docker logs`; retry usually works |
+| Phase 2a: "git not found" | Git not installed on node | Script installs it automatically via proxy; if it fails: `dnf install -y git` |
+| Phase 3: "must be run as root" | Missing sudo | Run with `sudo bash scripts/3-setup-ec2.sh --local` |
+| Phase 4: Build hangs | Slow Maven downloads through proxy | SSH to Node 4, check `docker logs`; retry usually works |
 | Phase 5: Connect "pull access denied" | Image not built locally | Run Phase 4 first on Node 4 |
 | Phase 6: "Connect not responding" | Connect not started or still initializing | Wait 1-2 min after Phase 5, then retry |
 | Phase 7: "No data in Aurora" | Connectors not RUNNING | Check: `curl http://localhost:8083/connectors/<name>/status` |
-| Profile switch: "No instance ID" | .env missing `*_INSTANCE_ID` vars | Add instance IDs to .env, re-run |
+| Profile switch: "No instance ID" | SSM mode + .env missing `*_INSTANCE_ID` vars | Add instance IDs to .env, or switch to `DISPATCH_MODE=ssh` |
 
 ---
 
 ## Quick Reference
 
+### SSM mode (default — `DISPATCH_MODE=ssm`)
+
 ```bash
-# Full deployment (run in order):
+# Full deployment (run in order from any machine with AWS CLI):
 ./scripts/0-preflight.sh
 ./scripts/1-validate-env.sh
-./scripts/2a-deploy-repo.sh
-./scripts/2b-distribute-env.sh
-./scripts/3-setup-ec2.sh
-./scripts/4-build-connect.sh
+./scripts/2a-deploy-repo.sh                  # dispatches git clone to all 5 nodes via SSM
+./scripts/2b-distribute-env.sh               # copies .env to all 5 nodes via SSM
+./scripts/3-setup-ec2.sh                     # bootstraps all 5 nodes via SSM
+./scripts/4-build-connect.sh                 # builds Connect image on Node 4 via SSM
 ./scripts/5-start-node.sh broker1 && ./scripts/5-start-node.sh broker2 && ./scripts/5-start-node.sh broker3
 # Wait 3-5 min for KRaft
 ./scripts/5-start-node.sh connect
 ./scripts/5-start-node.sh monitor
 ./scripts/6-deploy-connectors.sh
 ./scripts/7-validate-poc.sh
+```
 
-# Post-deployment:
+### SSH mode (`DISPATCH_MODE=ssh`, `SSH_KEY_PATH=~/.ssh/id_rsa`)
+
+```bash
+# From control machine:
+./scripts/0-preflight.sh                     # checks SSH reachability of all nodes
+./scripts/1-validate-env.sh
+./scripts/2b-distribute-env.sh               # scp .env to all 5 nodes
+
+# SSH into each node and run --local (repeat for all 5 nodes):
+ssh -i ~/.ssh/id_rsa ec2-user@<node-ip>
+  bash scripts/2a-deploy-repo.sh --local     # clone repo
+  sudo bash scripts/3-setup-ec2.sh --local   # bootstrap Docker, NVMe, tuning
+
+# SSH into Node 4 only:
+ssh -i ~/.ssh/id_rsa ec2-user@<connect-ip>
+  bash scripts/4-build-connect.sh --local    # build Connect image
+
+# SSH into each node for start (or use SSM dispatch from control machine):
+ssh -i ~/.ssh/id_rsa ec2-user@<broker1-ip>
+  bash scripts/5-start-node.sh --local broker1
+# ...repeat for broker2, broker3, connect, monitor
+
+# From Node 4 (or any node that can reach Connect REST API):
+./scripts/6-deploy-connectors.sh
+./scripts/7-validate-poc.sh
+```
+
+### Post-deployment (both modes)
+
+```bash
 ./scripts/on-demand-switch-profile.sh streaming   # After snapshot completes
 ./scripts/ops-node-status-ssm.sh                  # Check all nodes
-./scripts/ops-health-check.sh                     # Health check
+./scripts/ops-health-check.sh                     # Health check (local node)
 ./scripts/teardown-reset-all-nodes.sh             # Full reset
 ```
 

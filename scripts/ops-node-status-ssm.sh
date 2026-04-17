@@ -1,32 +1,23 @@
 #!/bin/bash
 ###############################################################################
-# Node Status Dashboard — AWS Systems Manager Edition
+# Node Status Dashboard
 #
 # Displays all 5 EC2 nodes and their Confluent Platform service status.
-# Uses AWS SSM to query nodes remotely (no SSH needed, works from anywhere).
-# Shows which services are running/stopped with color coding.
+# Supports both SSM dispatch (default) and SSH dispatch modes.
 #
-# Usage (from your local machine):
-#   bash scripts/node-status-ssm.sh <b1-id> <b2-id> <b3-id> <c1-id> <m1-id>
+# Usage (auto-detects DISPATCH_MODE from .env):
+#   bash scripts/ops-node-status-ssm.sh
 #
-#   Example:
-#   bash scripts/node-status-ssm.sh i-0abc1234 i-0def5678 i-0ghi9012 i-0jkl3456 i-0mno7890
+# SSM mode (default): queries nodes via AWS Systems Manager
+#   Requires: AWS CLI, EC2 IAM role with AmazonSSMManagedInstanceCore
+#   Uses: BROKER_*_INSTANCE_ID / CONNECT_1_INSTANCE_ID / MONITOR_1_INSTANCE_ID
 #
-# Or set environment variables:
-#   export BROKER_1_ID=i-0abc1234
-#   export BROKER_2_ID=i-0def5678
-#   export BROKER_3_ID=i-0ghi9012
-#   export CONNECT_1_ID=i-0jkl3456
-#   export MONITOR_1_ID=i-0mno7890
-#   bash scripts/node-status-ssm.sh
+# SSH mode (DISPATCH_MODE=ssh in .env): queries nodes via SSH
+#   Requires: SSH_KEY_PATH set in .env, key authorised on all nodes
+#   Uses: BROKER_*_IP / CONNECT_1_IP / MONITOR_1_IP
 #
-# Prerequisites:
-#   - AWS CLI v2 configured with credentials
-#   - EC2 instances have IAM role with SSM permissions (AmazonSSMManagedInstanceCore)
-#   - Instances are running and SSM agent is active
-#
-# Get instance IDs from AWS Console or CLI:
-#   aws ec2 describe-instances --filters "Name=tag:Name,Values=broker*" --query 'Reservations[].Instances[].[InstanceId,Tags[?Key==`Name`].Value|[0]]'
+# Or pass 5 instance IDs directly (SSM mode only):
+#   bash scripts/ops-node-status-ssm.sh i-0abc1234 i-0def5678 i-0ghi9012 i-0jkl3456 i-0mno7890
 ###############################################################################
 
 set -uo pipefail
@@ -57,54 +48,84 @@ if [ -f "$ENV_FILE" ]; then
   set -u
 fi
 
-# Parse arguments or use environment variables from .env
-if [ $# -lt 5 ]; then
-  # Try to load from .env first
-  BROKER_1_ID="${BROKER_1_INSTANCE_ID:-${BROKER_1_ID:-}}"
-  BROKER_2_ID="${BROKER_2_INSTANCE_ID:-${BROKER_2_ID:-}}"
-  BROKER_3_ID="${BROKER_3_INSTANCE_ID:-${BROKER_3_ID:-}}"
-  CONNECT_1_ID="${CONNECT_1_INSTANCE_ID:-${CONNECT_1_ID:-}}"
-  MONITOR_1_ID="${MONITOR_1_INSTANCE_ID:-${MONITOR_1_ID:-}}"
+DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
+DEPLOY_USER="${DEPLOY_USER:-ec2-user}"
+DEPLOY_DIR="${DEPLOY_DIR:-/home/${DEPLOY_USER}/cdc-on-ec2-docker}"
 
-  if [ -z "$BROKER_1_ID" ] || [ -z "$MONITOR_1_ID" ]; then
-    echo "Usage:"
-    echo "  bash scripts/ops-node-status-ssm.sh [options]"
-    echo ""
-    echo "Options:"
-    echo "  (no args)  — Read instance IDs from .env file (recommended)"
-    echo "  <ids>      — Pass 5 instance IDs: <b1-id> <b2-id> <b3-id> <c1-id> <m1-id>"
-    echo ""
-    echo "Example:"
-    echo "  bash scripts/ops-node-status-ssm.sh i-0abc1234 i-0def5678 i-0ghi9012 i-0jkl3456 i-0mno7890"
-    echo ""
-    echo "Get instance IDs:"
-    echo "  aws ec2 describe-instances --query 'Reservations[].Instances[].[InstanceId,Tags[?Key==\`Name\`].Value|[0]]' --output table"
+# ---------------------------------------------------------------------------
+# SSH mode: use IPs directly
+# ---------------------------------------------------------------------------
+if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+  SSH_KEY="${SSH_KEY_PATH:-}"
+  if [[ -z "$SSH_KEY" ]]; then
+    echo "❌ SSH_KEY_PATH not set in .env (required for DISPATCH_MODE=ssh)"
     exit 1
   fi
+  if [[ ! -f "$SSH_KEY" ]]; then
+    echo "❌ SSH key not found: $SSH_KEY"
+    exit 1
+  fi
+  # Map names to IPs for SSH mode
+  NODE_NAMES=("Node 1 — Broker 1" "Node 2 — Broker 2" "Node 3 — Broker 3" "Node 4 — Connect + Schema Registry" "Node 5 — Monitoring & Control")
+  NODE_ADDRS=("${BROKER_1_IP:-}" "${BROKER_2_IP:-}" "${BROKER_3_IP:-}" "${CONNECT_1_IP:-}" "${MONITOR_1_IP:-}")
+
+  # Validate IPs set
+  for ip in "${NODE_ADDRS[@]}"; do
+    if [[ -z "$ip" ]]; then
+      echo "❌ One or more node IPs not set in .env — check BROKER_*_IP, CONNECT_1_IP, MONITOR_1_IP"
+      exit 1
+    fi
+  done
 else
-  BROKER_1_ID="$1"
-  BROKER_2_ID="$2"
-  BROKER_3_ID="$3"
-  CONNECT_1_ID="$4"
-  MONITOR_1_ID="$5"
+  # ---------------------------------------------------------------------------
+  # SSM mode: use instance IDs
+  # ---------------------------------------------------------------------------
+  # Check AWS CLI
+  if ! command -v aws &>/dev/null; then
+    echo "❌ AWS CLI not found. Install with: pip install awscli"
+    exit 1
+  fi
+
+  # Parse arguments or use environment variables from .env
+  if [ $# -lt 5 ]; then
+    BROKER_1_ID="${BROKER_1_INSTANCE_ID:-${BROKER_1_ID:-}}"
+    BROKER_2_ID="${BROKER_2_INSTANCE_ID:-${BROKER_2_ID:-}}"
+    BROKER_3_ID="${BROKER_3_INSTANCE_ID:-${BROKER_3_ID:-}}"
+    CONNECT_1_ID="${CONNECT_1_INSTANCE_ID:-${CONNECT_1_ID:-}}"
+    MONITOR_1_ID="${MONITOR_1_INSTANCE_ID:-${MONITOR_1_ID:-}}"
+
+    if [ -z "$BROKER_1_ID" ] || [ -z "$MONITOR_1_ID" ]; then
+      echo "Usage:"
+      echo "  bash scripts/ops-node-status-ssm.sh [options]"
+      echo ""
+      echo "Options:"
+      echo "  (no args)  — Read instance IDs from .env file (recommended)"
+      echo "  <ids>      — Pass 5 instance IDs: <b1-id> <b2-id> <b3-id> <c1-id> <m1-id>"
+      echo ""
+      echo "Example:"
+      echo "  bash scripts/ops-node-status-ssm.sh i-0abc1234 i-0def5678 i-0ghi9012 i-0jkl3456 i-0mno7890"
+      echo ""
+      echo "SSH mode: set DISPATCH_MODE=ssh and SSH_KEY_PATH in .env — no instance IDs needed."
+      exit 1
+    fi
+  else
+    BROKER_1_ID="$1"
+    BROKER_2_ID="$2"
+    BROKER_3_ID="$3"
+    CONNECT_1_ID="$4"
+    MONITOR_1_ID="$5"
+  fi
+
+  validate_instance_id "$BROKER_1_ID"
+  validate_instance_id "$BROKER_2_ID"
+  validate_instance_id "$BROKER_3_ID"
+  validate_instance_id "$CONNECT_1_ID"
+  validate_instance_id "$MONITOR_1_ID"
+
+  NODE_NAMES=("Node 1 — Broker 1" "Node 2 — Broker 2" "Node 3 — Broker 3" "Node 4 — Connect + Schema Registry" "Node 5 — Monitoring & Control")
+  NODE_ADDRS=("$BROKER_1_ID" "$BROKER_2_ID" "$BROKER_3_ID" "$CONNECT_1_ID" "$MONITOR_1_ID")
 fi
 
-# Validate all instance IDs
-validate_instance_id "$BROKER_1_ID"
-validate_instance_id "$BROKER_2_ID"
-validate_instance_id "$BROKER_3_ID"
-validate_instance_id "$CONNECT_1_ID"
-validate_instance_id "$MONITOR_1_ID"
-
-# Check AWS CLI
-if ! command -v aws &>/dev/null; then
-  echo "❌ AWS CLI not found. Install with: pip install awscli"
-  exit 1
-fi
-
-# Define nodes (ordered arrays for predictable display)
-NODE_NAMES=("Node 1 — Broker 1" "Node 2 — Broker 2" "Node 3 — Broker 3" "Node 4 — Connect + Schema Registry" "Node 5 — Monitoring & Control")
-NODE_IDS=("$BROKER_1_ID" "$BROKER_2_ID" "$BROKER_3_ID" "$CONNECT_1_ID" "$MONITOR_1_ID")
 
 echo ""
 echo -e "${BOLD}${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
@@ -124,49 +145,58 @@ else
 fi
 echo ""
 
-# Function to get service status via SSM
+# Function to get service status from a node (SSH or SSM)
 get_node_status() {
   local node_name="$1"
-  local instance_id="$2"
+  local node_addr="$2"   # instance ID (ssm) or IP (ssh)
 
-  echo -e "${BOLD}${BLUE}─ $node_name ($instance_id)${NC}"
+  echo -e "${BOLD}${BLUE}─ $node_name ($node_addr)${NC}"
 
-  # Send command via SSM to check repo and docker compose status
-  local command_id
-  command_id=$(aws ssm send-command \
-    --instance-ids "$instance_id" \
-    --document-name "AWS-RunShellScript" \
-    --parameters 'commands=["cd /home/ec2-user/cdc-on-ec2-docker && docker compose ps --format json 2>&1"]' \
-    --region "${AWS_REGION:-us-east-1}" \
-    --query 'Command.CommandId' \
-    --output text 2>/dev/null || echo "")
-
-  if [ -z "$command_id" ]; then
-    echo -e "  ${RED}✗ UNREACHABLE${NC} (SSM send-command failed)"
-    echo ""
-    return 0
-  fi
-
-  # Wait for command to complete (with retries for slow networks)
-  local max_retries=30
-  local retry_count=0
   local output=""
 
-  while [ $retry_count -lt $max_retries ]; do
-    sleep 1
-    output=$(aws ssm get-command-invocation \
-      --command-id "$command_id" \
-      --instance-id "$instance_id" \
+  if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+    output=$(ssh -i "${SSH_KEY_PATH}" -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+      "${DEPLOY_USER}@${node_addr}" \
+      "cd ${DEPLOY_DIR} && docker compose ps --format json 2>&1" 2>/dev/null || echo "")
+    if [[ -z "$output" ]]; then
+      echo -e "  ${RED}✗ UNREACHABLE${NC} (SSH connection failed)"
+      echo ""
+      return 0
+    fi
+  else
+    local command_id
+    command_id=$(aws ssm send-command \
+      --instance-ids "$node_addr" \
+      --document-name "AWS-RunShellScript" \
+      --parameters "commands=[\"cd ${DEPLOY_DIR} && docker compose ps --format json 2>&1\"]" \
       --region "${AWS_REGION:-us-east-1}" \
-      --query 'StandardOutputContent' \
+      --query 'Command.CommandId' \
       --output text 2>/dev/null || echo "")
 
-    # If we have output or command status shows it completed, break
-    if [ -n "$output" ] && ! [[ "$output" =~ "not yet invoked" ]]; then
-      break
+    if [ -z "$command_id" ]; then
+      echo -e "  ${RED}✗ UNREACHABLE${NC} (SSM send-command failed)"
+      echo ""
+      return 0
     fi
-    retry_count=$((retry_count + 1))
-  done
+
+    local max_retries=30
+    local retry_count=0
+
+    while [ $retry_count -lt $max_retries ]; do
+      sleep 1
+      output=$(aws ssm get-command-invocation \
+        --command-id "$command_id" \
+        --instance-id "$node_addr" \
+        --region "${AWS_REGION:-us-east-1}" \
+        --query 'StandardOutputContent' \
+        --output text 2>/dev/null || echo "")
+
+      if [ -n "$output" ] && ! [[ "$output" =~ "not yet invoked" ]]; then
+        break
+      fi
+      retry_count=$((retry_count + 1))
+    done
+  fi
 
   # Parse output
   if [ -z "$output" ]; then
@@ -268,13 +298,17 @@ get_node_status() {
 
 # Iterate through nodes
 for i in "${!NODE_NAMES[@]}"; do
-  get_node_status "${NODE_NAMES[$i]}" "${NODE_IDS[$i]}"
+  get_node_status "${NODE_NAMES[$i]}" "${NODE_ADDRS[$i]}"
 done
 
 echo -e "${BOLD}${BLUE}Legend:${NC}"
 echo -e "  ${GREEN}●${NC} = Running | ${RED}●${NC} = Stopped | ${YELLOW}●${NC} = Unknown"
 echo ""
-echo -e "${GREY}Tip: To stream logs from a node, run:${NC}"
+echo -e "${GREY}Tip: To stream logs from a node:${NC}"
+if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+echo -e "  ${GREY}ssh -i ${SSH_KEY_PATH:-~/.ssh/id_rsa} ${DEPLOY_USER}@<node-ip>${NC}"
+else
 echo -e "  ${GREY}aws ssm start-session --target <instance-id>${NC}"
-echo -e "  ${GREY}cd cdc-on-ec2-docker && docker compose logs -f <service>${NC}"
+fi
+echo -e "  ${GREY}cd ${DEPLOY_DIR} && docker compose logs -f <service>${NC}"
 echo ""

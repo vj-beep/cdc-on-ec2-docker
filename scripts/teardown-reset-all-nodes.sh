@@ -38,7 +38,7 @@
 
 set -euo pipefail
 
-# Load .env for instance IDs and version variables
+# Load .env for instance IDs / IPs and version variables
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -f "$SCRIPT_DIR/.env" ]]; then
   set +u; set -a; source "$SCRIPT_DIR/.env"; set +a; set -u
@@ -46,6 +46,9 @@ fi
 CP_VERSION="${CP_VERSION:-8.0.0}"
 CONTROL_CENTER_VERSION="${CONTROL_CENTER_VERSION:-2.2.0}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
+DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
+DEPLOY_USER="${DEPLOY_USER:-ec2-user}"
+DEPLOY_DIR="${DEPLOY_DIR:-/home/${DEPLOY_USER}/cdc-on-ec2-docker}"
 
 # Color output
 RED='\033[0;31m'
@@ -107,45 +110,72 @@ for nt in "${NODE_TYPES[@]}"; do
   fi
 done
 
-# Map node types to instance IDs
-get_instance_id() {
+# Map node to address (IP for SSH mode, instance ID for SSM mode)
+get_node_addr() {
   local node="$1"
-  case "$node" in
-    broker1) echo "${BROKER_1_INSTANCE_ID:-${BROKER_1_ID:-}}" ;;
-    broker2) echo "${BROKER_2_INSTANCE_ID:-${BROKER_2_ID:-}}" ;;
-    broker3) echo "${BROKER_3_INSTANCE_ID:-${BROKER_3_ID:-}}" ;;
-    connect) echo "${CONNECT_1_INSTANCE_ID:-${CONNECT_1_ID:-}}" ;;
-    monitor) echo "${MONITOR_1_INSTANCE_ID:-${MONITOR_1_ID:-}}" ;;
-  esac
+  if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+    case "$node" in
+      broker1) echo "${BROKER_1_IP:-}" ;;
+      broker2) echo "${BROKER_2_IP:-}" ;;
+      broker3) echo "${BROKER_3_IP:-}" ;;
+      connect) echo "${CONNECT_1_IP:-}" ;;
+      monitor) echo "${MONITOR_1_IP:-}" ;;
+    esac
+  else
+    case "$node" in
+      broker1) echo "${BROKER_1_INSTANCE_ID:-${BROKER_1_ID:-}}" ;;
+      broker2) echo "${BROKER_2_INSTANCE_ID:-${BROKER_2_ID:-}}" ;;
+      broker3) echo "${BROKER_3_INSTANCE_ID:-${BROKER_3_ID:-}}" ;;
+      connect) echo "${CONNECT_1_INSTANCE_ID:-${CONNECT_1_ID:-}}" ;;
+      monitor) echo "${MONITOR_1_INSTANCE_ID:-${MONITOR_1_ID:-}}" ;;
+    esac
+  fi
 }
 
-# Validate instance IDs
-validate_instance_id() {
-  local id="$1"
+validate_node_addr() {
+  local addr="$1"
   local node="$2"
-  if [[ -z "$id" ]]; then
-    echo -e "${RED}❌ No instance ID found for $node${NC}" >&2
-    echo "   Set ${node^^}_INSTANCE_ID in .env or pass IDs as arguments" >&2
+  if [[ -z "$addr" ]]; then
+    echo -e "${RED}❌ No address found for $node${NC}" >&2
+    if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+      echo "   Set ${node^^}_IP in .env" >&2
+    else
+      echo "   Set ${node^^}_INSTANCE_ID in .env" >&2
+    fi
     return 1
   fi
-  if [[ ${#id} -ne 19 ]] || ! [[ "$id" =~ ^i-[0-9a-f]{17}$ ]]; then
-    echo -e "${RED}❌ Invalid instance ID for $node: $id${NC}" >&2
-    return 1
+  if [[ "$DISPATCH_MODE" == "ssm" ]]; then
+    if [[ ${#addr} -ne 19 ]] || ! [[ "$addr" =~ ^i-[0-9a-f]{17}$ ]]; then
+      echo -e "${RED}❌ Invalid instance ID for $node: $addr${NC}" >&2
+      return 1
+    fi
   fi
 }
 
 # Check prerequisites
-if ! command -v aws &>/dev/null; then
-  echo "❌ AWS CLI not found. Install with: pip install awscli"
-  exit 1
+if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+  SSH_KEY="${SSH_KEY_PATH:-}"
+  if [[ -z "$SSH_KEY" ]]; then
+    echo "❌ SSH_KEY_PATH not set in .env (required for DISPATCH_MODE=ssh)"
+    exit 1
+  fi
+  if [[ ! -f "$SSH_KEY" ]]; then
+    echo "❌ SSH key not found: $SSH_KEY"
+    exit 1
+  fi
+else
+  if ! command -v aws &>/dev/null; then
+    echo "❌ AWS CLI not found. Install with: pip install awscli"
+    exit 1
+  fi
 fi
 
-# Validate all instance IDs before proceeding
-declare -A NODE_INSTANCE_MAP
+# Validate all node addresses before proceeding
+declare -A NODE_ADDR_MAP
 for node in "${NODES[@]}"; do
-  id=$(get_instance_id "$node")
-  validate_instance_id "$id" "$node" || exit 1
-  NODE_INSTANCE_MAP["$node"]="$id"
+  addr=$(get_node_addr "$node")
+  validate_node_addr "$addr" "$node" || exit 1
+  NODE_ADDR_MAP["$node"]="$addr"
 done
 
 # Build the teardown command for a given node type
@@ -217,92 +247,106 @@ echo "Kafka dir exists: \$(test -d \$KAFKA_DATA_DIR && echo 'yes (empty)' || ech
 EOFCMD
 }
 
-# Execute command on a node via SSM and wait for result
-run_ssm_command() {
+# Execute teardown command on a node (SSH or SSM)
+run_node_command() {
   local node="$1"
-  local instance_id="$2"
+  local node_addr="$2"
   local command="$3"
 
-  # Base64-encode the script to avoid JSON/quote escaping issues
   local encoded
   encoded=$(echo "$command" | base64 -w 0)
 
-  # Send command via SSM — decode and execute on the remote node
-  local command_id
-  command_id=$(aws ssm send-command \
-    --instance-ids "$instance_id" \
-    --document-name "AWS-RunShellScript" \
-    --parameters "commands=[\"echo $encoded | base64 -d | bash\"]" \
-    --timeout-seconds 120 \
-    --region "$AWS_REGION" \
-    --query 'Command.CommandId' \
-    --output text 2>/dev/null || echo "")
+  if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+    local output
+    output=$(echo "$command" | ssh -i "${SSH_KEY_PATH}" \
+      -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+      "${DEPLOY_USER}@${node_addr}" "bash -s" 2>&1) && {
+      if [[ "$VERBOSE" == true ]]; then
+        echo "$output" | sed 's/^/    /'
+      else
+        echo "$output" | grep -E "^(===|Remaining|Kafka)" | sed 's/^/    /'
+      fi
+      return 0
+    } || {
+      echo -e "  ${RED}✗ SSH command failed for $node ($node_addr)${NC}"
+      [[ "$VERBOSE" == true ]] && echo "$output" | sed 's/^/    /'
+      return 1
+    }
+  else
+    local command_id
+    command_id=$(aws ssm send-command \
+      --instance-ids "$node_addr" \
+      --document-name "AWS-RunShellScript" \
+      --parameters "commands=[\"echo $encoded | base64 -d | bash\"]" \
+      --timeout-seconds 120 \
+      --region "$AWS_REGION" \
+      --query 'Command.CommandId' \
+      --output text 2>/dev/null || echo "")
 
-  if [[ -z "$command_id" ]]; then
-    echo -e "  ${RED}✗ SSM send-command failed for $node ($instance_id)${NC}"
+    if [[ -z "$command_id" ]]; then
+      echo -e "  ${RED}✗ SSM send-command failed for $node ($node_addr)${NC}"
+      return 1
+    fi
+
+    local max_wait=60
+    local waited=0
+    local status=""
+
+    while [[ $waited -lt $max_wait ]]; do
+      sleep 2
+      waited=$((waited + 2))
+
+      status=$(aws ssm get-command-invocation \
+        --command-id "$command_id" \
+        --instance-id "$node_addr" \
+        --region "$AWS_REGION" \
+        --query 'Status' \
+        --output text 2>/dev/null || echo "Pending")
+
+      case "$status" in
+        Success)
+          if [[ "$VERBOSE" == true ]]; then
+            local output
+            output=$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$node_addr" \
+              --region "$AWS_REGION" \
+              --query 'StandardOutputContent' \
+              --output text 2>/dev/null || echo "")
+            echo "$output" | sed 's/^/    /'
+          else
+            local output
+            output=$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$node_addr" \
+              --region "$AWS_REGION" \
+              --query 'StandardOutputContent' \
+              --output text 2>/dev/null || echo "")
+            echo "$output" | grep -E "^(===|Remaining|Kafka)" | sed 's/^/    /'
+          fi
+          return 0
+          ;;
+        Failed|TimedOut|Cancelled)
+          echo -e "  ${RED}✗ Command $status on $node${NC}"
+          if [[ "$VERBOSE" == true ]]; then
+            local err_output
+            err_output=$(aws ssm get-command-invocation \
+              --command-id "$command_id" \
+              --instance-id "$node_addr" \
+              --region "$AWS_REGION" \
+              --query 'StandardErrorContent' \
+              --output text 2>/dev/null || echo "")
+            [[ -n "$err_output" ]] && echo "$err_output" | sed 's/^/    /'
+          fi
+          return 1
+          ;;
+      esac
+    done
+
+    echo -e "  ${YELLOW}⚠ Timeout waiting for $node (command may still be running)${NC}"
+    echo "    Command ID: $command_id"
     return 1
   fi
-
-  # Wait for command to complete
-  local max_wait=60
-  local waited=0
-  local status=""
-
-  while [[ $waited -lt $max_wait ]]; do
-    sleep 2
-    waited=$((waited + 2))
-
-    status=$(aws ssm get-command-invocation \
-      --command-id "$command_id" \
-      --instance-id "$instance_id" \
-      --region "$AWS_REGION" \
-      --query 'Status' \
-      --output text 2>/dev/null || echo "Pending")
-
-    case "$status" in
-      Success)
-        if [[ "$VERBOSE" == true ]]; then
-          local output
-          output=$(aws ssm get-command-invocation \
-            --command-id "$command_id" \
-            --instance-id "$instance_id" \
-            --region "$AWS_REGION" \
-            --query 'StandardOutputContent' \
-            --output text 2>/dev/null || echo "")
-          echo "$output" | sed 's/^/    /'
-        else
-          # Show just the summary lines
-          local output
-          output=$(aws ssm get-command-invocation \
-            --command-id "$command_id" \
-            --instance-id "$instance_id" \
-            --region "$AWS_REGION" \
-            --query 'StandardOutputContent' \
-            --output text 2>/dev/null || echo "")
-          echo "$output" | grep -E "^(===|Remaining|Kafka)" | sed 's/^/    /'
-        fi
-        return 0
-        ;;
-      Failed|TimedOut|Cancelled)
-        echo -e "  ${RED}✗ Command $status on $node${NC}"
-        if [[ "$VERBOSE" == true ]]; then
-          local err_output
-          err_output=$(aws ssm get-command-invocation \
-            --command-id "$command_id" \
-            --instance-id "$instance_id" \
-            --region "$AWS_REGION" \
-            --query 'StandardErrorContent' \
-            --output text 2>/dev/null || echo "")
-          [[ -n "$err_output" ]] && echo "$err_output" | sed 's/^/    /'
-        fi
-        return 1
-        ;;
-    esac
-  done
-
-  echo -e "  ${YELLOW}⚠ Timeout waiting for $node (command may still be running)${NC}"
-  echo "    Command ID: $command_id"
-  return 1
 }
 
 # Confirmation prompt
@@ -312,9 +356,9 @@ if [[ "$SKIP_CONFIRM" != true ]]; then
   echo -e "${RED}║ WARNING: DESTRUCTIVE OPERATION - POINT OF NO RETURN                    ║${NC}"
   echo -e "${RED}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo "This will completely reset the following nodes via SSM:"
+  echo "This will completely reset the following nodes (DISPATCH_MODE=${DISPATCH_MODE}):"
   for node in "${NODES[@]}"; do
-    echo "  • $node (${NODE_INSTANCE_MAP[$node]})"
+    echo "  • $node (${NODE_ADDR_MAP[$node]})"
   done
   echo ""
   echo -e "${RED}Data that will be PERMANENTLY DELETED:${NC}"
@@ -336,7 +380,7 @@ fi
 
 echo ""
 echo -e "${BOLD}${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${BLUE}║     CDC deployment — Cluster Teardown (via AWS SSM)                     ║${NC}"
+echo -e "${BOLD}${BLUE}║     CDC deployment — Cluster Teardown (${DISPATCH_MODE^^} mode)                        ║${NC}"
 echo -e "${BOLD}${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -346,12 +390,12 @@ SUCCESS_COUNT=0
 FAIL_COUNT=0
 
 for node in "${NODES[@]}"; do
-  instance_id="${NODE_INSTANCE_MAP[$node]}"
-  echo -e "${BLUE}━━━ $node ($instance_id) ━━━${NC}"
+  node_addr="${NODE_ADDR_MAP[$node]}"
+  echo -e "${BLUE}━━━ $node ($node_addr) ━━━${NC}"
 
   command=$(build_teardown_command "$node")
 
-  if run_ssm_command "$node" "$instance_id" "$command"; then
+  if run_node_command "$node" "$node_addr" "$command"; then
     echo -e "  ${GREEN}✓ $node reset complete${NC}"
     SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
   else

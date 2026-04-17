@@ -31,8 +31,8 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 # ---------------------------------------------------------------------------
-# SSM Dispatch Mode (jumpbox → all nodes)
-# When not root and no --local flag, dispatch to all nodes via SSM
+# Dispatch Mode (jumpbox → all nodes via SSM or SSH)
+# When not root and no --local flag, dispatch to all nodes
 # ---------------------------------------------------------------------------
 if [[ $EUID -ne 0 && "${1:-}" != "--local" ]]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -45,67 +45,100 @@ if [[ $EUID -ne 0 && "${1:-}" != "--local" ]]; then
     fi
     source "$ENV_FILE"
 
-    echo "[*] Phase 3: Bootstrap EC2 nodes via SSM"
+    DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
+    DEPLOY_USER="${DEPLOY_USER:-ec2-user}"
+    DEPLOY_DIR="/home/${DEPLOY_USER}/cdc-on-ec2-docker"
+
+    echo "[*] Phase 3: Bootstrap EC2 nodes (${DISPATCH_MODE^^} mode)"
     echo "    Dispatching setup to all 5 nodes..."
     echo ""
 
-    NODES=(
-        "broker1:${BROKER_1_INSTANCE_ID}"
-        "broker2:${BROKER_2_INSTANCE_ID}"
-        "broker3:${BROKER_3_INSTANCE_ID}"
-        "connect:${CONNECT_1_INSTANCE_ID}"
-        "monitor:${MONITOR_1_INSTANCE_ID}"
-    )
+    if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+        SSH_KEY="${SSH_KEY_PATH:-}"
+        if [[ -z "$SSH_KEY" || ! -f "$SSH_KEY" ]]; then
+            error "SSH_KEY_PATH not set or key not found (required for DISPATCH_MODE=ssh)"
+            exit 1
+        fi
+        NODES=(
+            "broker1:${BROKER_1_IP}"
+            "broker2:${BROKER_2_IP}"
+            "broker3:${BROKER_3_IP}"
+            "connect:${CONNECT_1_IP}"
+            "monitor:${MONITOR_1_IP}"
+        )
+    else
+        NODES=(
+            "broker1:${BROKER_1_INSTANCE_ID}"
+            "broker2:${BROKER_2_INSTANCE_ID}"
+            "broker3:${BROKER_3_INSTANCE_ID}"
+            "connect:${CONNECT_1_INSTANCE_ID}"
+            "monitor:${MONITOR_1_INSTANCE_ID}"
+        )
+    fi
 
-    DEPLOY_DIR="/home/ec2-user/cdc-on-ec2-docker"
     FAILED=0
 
     for entry in "${NODES[@]}"; do
         node_name="${entry%%:*}"
-        instance_id="${entry##*:}"
-        echo -n "  🚀 $node_name ($instance_id)... "
+        node_addr="${entry##*:}"
+        echo -n "  🚀 $node_name ($node_addr)... "
 
-        cmd_id=$(aws ssm send-command \
-            --region "$AWS_REGION" \
-            --instance-ids "$instance_id" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "{\"commands\":[\"cd ${DEPLOY_DIR} && sudo bash scripts/3-setup-ec2.sh --local\"],\"executionTimeout\":[\"600\"]}" \
-            --timeout-seconds 600 \
-            --output text \
-            --query 'Command.CommandId' 2>/dev/null)
-
-        if [[ -z "$cmd_id" ]]; then
-            echo "❌ Failed to dispatch"
-            FAILED=$((FAILED + 1))
-            continue
-        fi
-
-        # Poll for completion
-        for i in $(seq 1 60); do
-            status=$(aws ssm get-command-invocation \
-                --region "$AWS_REGION" \
-                --command-id "$cmd_id" \
-                --instance-id "$instance_id" \
-                --query 'Status' --output text 2>/dev/null || echo "Pending")
-            if [[ "$status" == "Success" ]]; then
+        if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+            # SSH dispatch: run setup remotely via SSH
+            output=$(ssh -i "$SSH_KEY" \
+                -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                "${DEPLOY_USER}@${node_addr}" \
+                "cd ${DEPLOY_DIR} && sudo bash scripts/3-setup-ec2.sh --local" 2>&1) && {
                 echo "✅ done"
-                break
-            elif [[ "$status" == "Failed" || "$status" == "TimedOut" || "$status" == "Cancelled" ]]; then
-                echo "❌ $status"
-                # Show error output
-                aws ssm get-command-invocation \
+            } || {
+                echo "❌ Failed"
+                echo "$output" | tail -5 | sed 's/^/    /'
+                FAILED=$((FAILED + 1))
+            }
+        else
+            # SSM dispatch
+            cmd_id=$(aws ssm send-command \
+                --region "$AWS_REGION" \
+                --instance-ids "$node_addr" \
+                --document-name "AWS-RunShellScript" \
+                --parameters "{\"commands\":[\"cd ${DEPLOY_DIR} && sudo bash scripts/3-setup-ec2.sh --local\"],\"executionTimeout\":[\"600\"]}" \
+                --timeout-seconds 600 \
+                --output text \
+                --query 'Command.CommandId' 2>/dev/null)
+
+            if [[ -z "$cmd_id" ]]; then
+                echo "❌ Failed to dispatch"
+                FAILED=$((FAILED + 1))
+                continue
+            fi
+
+            # Poll for completion
+            status="Pending"
+            for i in $(seq 1 60); do
+                status=$(aws ssm get-command-invocation \
                     --region "$AWS_REGION" \
                     --command-id "$cmd_id" \
-                    --instance-id "$instance_id" \
-                    --query 'StandardErrorContent' --output text 2>/dev/null | tail -5
+                    --instance-id "$node_addr" \
+                    --query 'Status' --output text 2>/dev/null || echo "Pending")
+                if [[ "$status" == "Success" ]]; then
+                    echo "✅ done"
+                    break
+                elif [[ "$status" == "Failed" || "$status" == "TimedOut" || "$status" == "Cancelled" ]]; then
+                    echo "❌ $status"
+                    aws ssm get-command-invocation \
+                        --region "$AWS_REGION" \
+                        --command-id "$cmd_id" \
+                        --instance-id "$node_addr" \
+                        --query 'StandardErrorContent' --output text 2>/dev/null | tail -5
+                    FAILED=$((FAILED + 1))
+                    break
+                fi
+                sleep 10
+            done
+            if [[ "$status" != "Success" && "$status" != "Failed" && "$status" != "TimedOut" && "$status" != "Cancelled" ]]; then
+                echo "❌ Timed out waiting"
                 FAILED=$((FAILED + 1))
-                break
             fi
-            sleep 10
-        done
-        if [[ "$status" != "Success" && "$status" != "Failed" && "$status" != "TimedOut" && "$status" != "Cancelled" ]]; then
-            echo "❌ Timed out waiting"
-            FAILED=$((FAILED + 1))
         fi
     done
 
@@ -113,7 +146,7 @@ if [[ $EUID -ne 0 && "${1:-}" != "--local" ]]; then
     if [[ $FAILED -eq 0 ]]; then
         echo "✅ All 5 nodes bootstrapped successfully"
     else
-        echo "❌ $FAILED node(s) failed — check SSM command history"
+        echo "❌ $FAILED node(s) failed — check ${DISPATCH_MODE^^} output above"
         exit 1
     fi
     exit 0

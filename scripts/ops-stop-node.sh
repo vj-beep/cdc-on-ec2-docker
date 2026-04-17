@@ -35,7 +35,7 @@ NODE=$1
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # ---------------------------------------------------------------------------
-# SSM Dispatch Mode (jumpbox → target node)
+# Dispatch Mode (jumpbox → target node via SSM or SSH)
 # ---------------------------------------------------------------------------
 if [[ "$LOCAL_MODE" -eq 0 && "${CDC_ON_NODE:-}" != "1" ]]; then
     ENV_FILE="$REPO_DIR/.env"
@@ -47,59 +47,87 @@ if [[ "$LOCAL_MODE" -eq 0 && "${CDC_ON_NODE:-}" != "1" ]]; then
     fi
     source "$ENV_FILE"
 
+    DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
+    DEPLOY_USER="${DEPLOY_USER:-ec2-user}"
+    DEPLOY_DIR="/home/${DEPLOY_USER}/cdc-on-ec2-docker"
+
+    # Map node name to IP and instance ID
     case $NODE in
-      broker1) INSTANCE_ID="$BROKER_1_INSTANCE_ID" ;;
-      broker2) INSTANCE_ID="$BROKER_2_INSTANCE_ID" ;;
-      broker3) INSTANCE_ID="$BROKER_3_INSTANCE_ID" ;;
-      connect) INSTANCE_ID="$CONNECT_1_INSTANCE_ID" ;;
-      monitor) INSTANCE_ID="$MONITOR_1_INSTANCE_ID" ;;
+      broker1) NODE_IP="$BROKER_1_IP"; INSTANCE_ID="${BROKER_1_INSTANCE_ID:-}" ;;
+      broker2) NODE_IP="$BROKER_2_IP"; INSTANCE_ID="${BROKER_2_INSTANCE_ID:-}" ;;
+      broker3) NODE_IP="$BROKER_3_IP"; INSTANCE_ID="${BROKER_3_INSTANCE_ID:-}" ;;
+      connect) NODE_IP="$CONNECT_1_IP"; INSTANCE_ID="${CONNECT_1_INSTANCE_ID:-}" ;;
+      monitor) NODE_IP="$MONITOR_1_IP"; INSTANCE_ID="${MONITOR_1_INSTANCE_ID:-}" ;;
       *) echo "❌ Unknown node: $NODE"; exit 1 ;;
     esac
 
-    DEPLOY_DIR="/home/ec2-user/cdc-on-ec2-docker"
-    echo "🛑 Stopping $NODE on $INSTANCE_ID via SSM..."
-
-    cmd_id=$(aws ssm send-command \
-        --region "$AWS_REGION" \
-        --instance-ids "$INSTANCE_ID" \
-        --document-name "AWS-RunShellScript" \
-        --parameters "{\"commands\":[\"cd ${DEPLOY_DIR} && CDC_ON_NODE=1 bash scripts/ops-stop-node.sh ${NODE}\"],\"executionTimeout\":[\"120\"]}" \
-        --timeout-seconds 120 \
-        --output text \
-        --query 'Command.CommandId' 2>/dev/null)
-
-    if [[ -z "$cmd_id" ]]; then
-        echo "❌ Failed to dispatch SSM command"
-        exit 1
-    fi
-
-    for i in $(seq 1 30); do
-        status=$(aws ssm get-command-invocation \
-            --region "$AWS_REGION" \
-            --command-id "$cmd_id" \
-            --instance-id "$INSTANCE_ID" \
-            --query 'Status' --output text 2>/dev/null || echo "Pending")
-        if [[ "$status" == "Success" ]]; then
-            aws ssm get-command-invocation \
-                --region "$AWS_REGION" \
-                --command-id "$cmd_id" \
-                --instance-id "$INSTANCE_ID" \
-                --query 'StandardOutputContent' --output text 2>/dev/null
-            echo "✅ $NODE stopped successfully"
-            exit 0
-        elif [[ "$status" == "Failed" || "$status" == "TimedOut" || "$status" == "Cancelled" ]]; then
-            echo "❌ $NODE stop failed ($status)"
-            aws ssm get-command-invocation \
-                --region "$AWS_REGION" \
-                --command-id "$cmd_id" \
-                --instance-id "$INSTANCE_ID" \
-                --query 'StandardErrorContent' --output text 2>/dev/null | tail -5
+    if [[ "$DISPATCH_MODE" == "ssh" ]]; then
+        # --- SSH dispatch ---
+        SSH_KEY="${SSH_KEY_PATH:-}"
+        if [[ -z "$SSH_KEY" || ! -f "$SSH_KEY" ]]; then
+            echo "❌ SSH_KEY_PATH not set or key not found (required for DISPATCH_MODE=ssh)"
             exit 1
         fi
-        sleep 5
-    done
-    echo "❌ Timed out waiting for $NODE to stop"
-    exit 1
+
+        echo "🛑 Stopping $NODE on $NODE_IP via SSH..."
+        ssh -i "$SSH_KEY" \
+            -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+            "${DEPLOY_USER}@${NODE_IP}" \
+            "cd ${DEPLOY_DIR} && CDC_ON_NODE=1 bash scripts/ops-stop-node.sh ${NODE}" 2>&1
+
+        if [[ $? -eq 0 ]]; then
+            echo "✅ $NODE stopped successfully"
+        else
+            echo "❌ $NODE stop failed via SSH"
+            exit 1
+        fi
+    else
+        # --- SSM dispatch ---
+        echo "🛑 Stopping $NODE on $INSTANCE_ID via SSM..."
+
+        cmd_id=$(aws ssm send-command \
+            --region "$AWS_REGION" \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "{\"commands\":[\"cd ${DEPLOY_DIR} && CDC_ON_NODE=1 bash scripts/ops-stop-node.sh ${NODE}\"],\"executionTimeout\":[\"120\"]}" \
+            --timeout-seconds 120 \
+            --output text \
+            --query 'Command.CommandId' 2>/dev/null)
+
+        if [[ -z "$cmd_id" ]]; then
+            echo "❌ Failed to dispatch SSM command"
+            exit 1
+        fi
+
+        for i in $(seq 1 30); do
+            status=$(aws ssm get-command-invocation \
+                --region "$AWS_REGION" \
+                --command-id "$cmd_id" \
+                --instance-id "$INSTANCE_ID" \
+                --query 'Status' --output text 2>/dev/null || echo "Pending")
+            if [[ "$status" == "Success" ]]; then
+                aws ssm get-command-invocation \
+                    --region "$AWS_REGION" \
+                    --command-id "$cmd_id" \
+                    --instance-id "$INSTANCE_ID" \
+                    --query 'StandardOutputContent' --output text 2>/dev/null
+                echo "✅ $NODE stopped successfully"
+                exit 0
+            elif [[ "$status" == "Failed" || "$status" == "TimedOut" || "$status" == "Cancelled" ]]; then
+                echo "❌ $NODE stop failed ($status)"
+                aws ssm get-command-invocation \
+                    --region "$AWS_REGION" \
+                    --command-id "$cmd_id" \
+                    --instance-id "$INSTANCE_ID" \
+                    --query 'StandardErrorContent' --output text 2>/dev/null | tail -5
+                exit 1
+            fi
+            sleep 5
+        done
+        echo "❌ Timed out waiting for $NODE to stop"
+        exit 1
+    fi
+    exit 0
 fi
 
 # ---------------------------------------------------------------------------

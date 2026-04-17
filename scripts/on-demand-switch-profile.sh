@@ -160,64 +160,85 @@ if [[ "${CONFIRM}" =~ ^[Yy]$ ]]; then
     "${SCRIPT_DIR}/2b-distribute-env.sh"
 
     echo ""
-    info "Restarting services on all nodes via SSM..."
-
-    # Source .env for instance IDs
+    # Source .env for instance IDs / IPs and dispatch mode
     source "${ENV_FILE}"
     AWS_REGION=${AWS_REGION:-us-east-1}
+    DISPATCH_MODE="${DISPATCH_MODE:-ssm}"
 
-    declare -A NODE_MAP=(
-        [broker1]="${BROKER_1_INSTANCE_ID}"
-        [broker2]="${BROKER_2_INSTANCE_ID}"
-        [broker3]="${BROKER_3_INSTANCE_ID}"
-        [connect]="${CONNECT_1_INSTANCE_ID}"
-        [monitor]="${MONITOR_1_INSTANCE_ID}"
-    )
+    info "Restarting services on all nodes (DISPATCH_MODE=${DISPATCH_MODE})..."
+
+    DEPLOY_USER="${DEPLOY_USER:-ec2-user}"
+    DEPLOY_DIR="${DEPLOY_DIR:-/home/${DEPLOY_USER}/cdc-on-ec2-docker}"
 
     RESTART_FAILED=()
     for NODE in broker1 broker2 broker3 connect monitor; do
-        INSTANCE_ID="${NODE_MAP[$NODE]}"
-        if [[ -z "${INSTANCE_ID}" ]]; then
-            warn "No instance ID for ${NODE} — skipping"
-            RESTART_FAILED+=("${NODE}")
-            continue
-        fi
-
-        info "Restarting ${NODE} (${INSTANCE_ID})..."
-        CMD_ID=$(aws ssm send-command \
-            --region "${AWS_REGION}" \
-            --instance-ids "${INSTANCE_ID}" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"cd /home/ec2-user/cdc-on-ec2-docker && ./scripts/5-start-node.sh ${NODE}\"]" \
-            --query 'Command.CommandId' \
-            --output text 2>/dev/null)
-
-        if [[ -z "${CMD_ID}" || "${CMD_ID}" == "None" ]]; then
-            error "Failed to send restart command to ${NODE}"
-            RESTART_FAILED+=("${NODE}")
-            continue
-        fi
-
-        # Poll for completion (up to 3 minutes)
-        TIMEOUT=180
-        ELAPSED=0
-        STATUS="InProgress"
-        while [[ "${STATUS}" == "InProgress" && ${ELAPSED} -lt ${TIMEOUT} ]]; do
-            sleep 5
-            ELAPSED=$((ELAPSED + 5))
-            STATUS=$(aws ssm get-command-invocation \
-                --region "${AWS_REGION}" \
-                --command-id "${CMD_ID}" \
-                --instance-id "${INSTANCE_ID}" \
-                --query 'Status' \
-                --output text 2>/dev/null)
-        done
-
-        if [[ "${STATUS}" == "Success" ]]; then
-            info "${NODE} restarted ✅"
+        if [[ "${DISPATCH_MODE}" == "ssh" ]]; then
+            SSH_KEY="${SSH_KEY_PATH:-}"
+            case "${NODE}" in
+                broker1) NODE_IP="${BROKER_1_IP}" ;;
+                broker2) NODE_IP="${BROKER_2_IP}" ;;
+                broker3) NODE_IP="${BROKER_3_IP}" ;;
+                connect) NODE_IP="${CONNECT_1_IP}" ;;
+                monitor) NODE_IP="${MONITOR_1_IP}" ;;
+            esac
+            info "Restarting ${NODE} (${NODE_IP}) via SSH..."
+            if ssh -i "${SSH_KEY}" -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                   "${DEPLOY_USER}@${NODE_IP}" \
+                   "cd ${DEPLOY_DIR} && bash scripts/5-start-node.sh --local ${NODE}" 2>&1 | tail -3; then
+                info "${NODE} restarted ✅"
+            else
+                error "${NODE} restart failed"
+                RESTART_FAILED+=("${NODE}")
+            fi
         else
-            error "${NODE} restart failed (status: ${STATUS})"
-            RESTART_FAILED+=("${NODE}")
+            case "${NODE}" in
+                broker1) INSTANCE_ID="${BROKER_1_INSTANCE_ID}" ;;
+                broker2) INSTANCE_ID="${BROKER_2_INSTANCE_ID}" ;;
+                broker3) INSTANCE_ID="${BROKER_3_INSTANCE_ID}" ;;
+                connect) INSTANCE_ID="${CONNECT_1_INSTANCE_ID}" ;;
+                monitor) INSTANCE_ID="${MONITOR_1_INSTANCE_ID}" ;;
+            esac
+            if [[ -z "${INSTANCE_ID}" ]]; then
+                warn "No instance ID for ${NODE} — skipping"
+                RESTART_FAILED+=("${NODE}")
+                continue
+            fi
+
+            info "Restarting ${NODE} (${INSTANCE_ID}) via SSM..."
+            CMD_ID=$(aws ssm send-command \
+                --region "${AWS_REGION}" \
+                --instance-ids "${INSTANCE_ID}" \
+                --document-name "AWS-RunShellScript" \
+                --parameters "commands=[\"cd ${DEPLOY_DIR} && bash scripts/5-start-node.sh --local ${NODE}\"]" \
+                --query 'Command.CommandId' \
+                --output text 2>/dev/null)
+
+            if [[ -z "${CMD_ID}" || "${CMD_ID}" == "None" ]]; then
+                error "Failed to send restart command to ${NODE}"
+                RESTART_FAILED+=("${NODE}")
+                continue
+            fi
+
+            TIMEOUT=180
+            ELAPSED=0
+            STATUS="InProgress"
+            while [[ "${STATUS}" == "InProgress" && ${ELAPSED} -lt ${TIMEOUT} ]]; do
+                sleep 5
+                ELAPSED=$((ELAPSED + 5))
+                STATUS=$(aws ssm get-command-invocation \
+                    --region "${AWS_REGION}" \
+                    --command-id "${CMD_ID}" \
+                    --instance-id "${INSTANCE_ID}" \
+                    --query 'Status' \
+                    --output text 2>/dev/null)
+            done
+
+            if [[ "${STATUS}" == "Success" ]]; then
+                info "${NODE} restarted ✅"
+            else
+                error "${NODE} restart failed (status: ${STATUS})"
+                RESTART_FAILED+=("${NODE}")
+            fi
         fi
     done
 
@@ -226,7 +247,11 @@ if [[ "${CONFIRM}" =~ ^[Yy]$ ]]; then
         info "All nodes restarted with '${PROFILE}' profile. ✅"
     else
         error "Failed to restart: ${RESTART_FAILED[*]}"
-        echo "  Troubleshoot: aws ssm start-session --target <instance-id>"
+        if [[ "${DISPATCH_MODE}" == "ssh" ]]; then
+            echo "  Troubleshoot: ssh -i ${SSH_KEY_PATH} ${DEPLOY_USER}@<node-ip>"
+        else
+            echo "  Troubleshoot: aws ssm start-session --target <instance-id>"
+        fi
     fi
 
     echo ""
@@ -237,12 +262,10 @@ else
     echo ""
     info "Skipped. To apply manually:"
     echo "  1. ./scripts/2b-distribute-env.sh"
-    echo "  2. Restart on each node (via SSM or directly on the node):"
-    echo "     ./scripts/5-start-node.sh broker1"
-    echo "     ./scripts/5-start-node.sh broker2"
-    echo "     ./scripts/5-start-node.sh broker3"
-    echo "     ./scripts/5-start-node.sh connect"
-    echo "     ./scripts/5-start-node.sh monitor"
+    echo "  2. Restart on each node:"
+    echo "     SSM mode:  ./scripts/5-start-node.sh broker1 (dispatches via SSM)"
+    echo "     SSH mode:  ssh into each node, then: bash scripts/5-start-node.sh --local broker1"
+    echo "     Repeat for broker2, broker3, connect, monitor"
     echo "  3. Redeploy connectors to apply new batch/queue sizes:"
     echo "     ./scripts/6-deploy-connectors.sh"
 fi
