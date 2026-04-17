@@ -56,10 +56,16 @@ deploy_to_node() {
     local deploy_user="${DEPLOY_USER:-ec2-user}"
     local deploy_dir="${DEPLOY_DIR:-/home/${deploy_user}/cdc-on-ec2-docker}"
     local deploy_home=$(dirname "$deploy_dir")
+    local proxy_cmds=""
+    if [[ -n "${HTTP_PROXY:-}" ]]; then
+        proxy_cmds="export HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY}"
+    fi
     local cmd_json
     cmd_json=$(cat <<CMDJSON
 {
   "commands": [
+    "${proxy_cmds:-true}",
+    "which git >/dev/null 2>&1 || dnf install -y git",
     "mkdir -p $deploy_home",
     "cd $deploy_home",
     "rm -rf $(basename $deploy_dir) 2>/dev/null || true",

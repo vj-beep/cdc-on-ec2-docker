@@ -314,7 +314,7 @@ services:
   # Apache Flink® (Node 5)
   # ===========================================================
   flink-jobmanager:
-    image: flink:1.19-java11
+    image: flink:${FLINK_VERSION:-1.19-java11}
     network_mode: host
     restart: unless-stopped
     command: jobmanager
@@ -329,7 +329,7 @@ services:
         rest.address: 0.0.0.0
 
   flink-taskmanager:
-    image: flink:1.19-java11
+    image: flink:${FLINK_VERSION:-1.19-java11}
     network_mode: host
     restart: unless-stopped
     command: taskmanager
@@ -346,7 +346,7 @@ services:
   # Prometheus (Node 5)
   # ===========================================================
   prometheus:
-    image: prom/prometheus:v3.4.1
+    image: prom/prometheus:${PROMETHEUS_VERSION:-v3.4.1}
     network_mode: host
     restart: unless-stopped
     volumes:
@@ -361,7 +361,7 @@ services:
   # Grafana (Node 5 — port 8080 for Cloud9 preview)
   # ===========================================================
   grafana:
-    image: grafana/grafana:11.6.0
+    image: grafana/grafana:${GRAFANA_VERSION:-11.6.0}
     network_mode: host
     restart: unless-stopped
     volumes:
@@ -381,7 +381,7 @@ services:
   # Alertmanager (Node 5)
   # ===========================================================
   alertmanager:
-    image: prom/alertmanager:v0.28.1
+    image: prom/alertmanager:${ALERTMANAGER_VERSION:-v0.28.1}
     network_mode: host
     restart: unless-stopped
     volumes:
@@ -398,7 +398,7 @@ services:
   # Node Exporter (all nodes)
   # ===========================================================
   node-exporter:
-    image: prom/node-exporter:v1.9.1
+    image: prom/node-exporter:${NODE_EXPORTER_VERSION:-v1.9.1}
     network_mode: host
     restart: unless-stopped
     command:
@@ -413,7 +413,7 @@ services:
   # cAdvisor (all nodes — port 9080 to avoid Grafana 8080 conflict)
   # ===========================================================
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    image: gcr.io/cadvisor/cadvisor:${CADVISOR_VERSION:-v0.52.1}
     network_mode: host
     restart: unless-stopped
     command:
