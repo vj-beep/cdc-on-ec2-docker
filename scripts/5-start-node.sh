@@ -125,6 +125,18 @@ fi
 # ---------------------------------------------------------------------------
 cd "$REPO_DIR" || exit 1
 
+# Export proxy env vars for curl/docker downloads
+if [[ -f "$REPO_DIR/.env" ]]; then
+    _P=$(grep "^HTTP_PROXY=" "$REPO_DIR/.env" | cut -d= -f2- || true)
+    if [[ -n "$_P" ]]; then
+        export HTTP_PROXY="$_P" http_proxy="$_P"
+        export HTTPS_PROXY="$(grep "^HTTPS_PROXY=" "$REPO_DIR/.env" | cut -d= -f2- || true)"
+        export https_proxy="${HTTPS_PROXY}"
+        export NO_PROXY="$(grep "^NO_PROXY=" "$REPO_DIR/.env" | cut -d= -f2- || true)"
+        export no_proxy="${NO_PROXY}"
+    fi
+fi
+
 case $NODE in
   broker1)
     echo "🚀 Starting Broker 1 (Node 1)..."

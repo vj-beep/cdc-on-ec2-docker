@@ -76,13 +76,13 @@ fi
 echo "[*] Instance ID: $instance_id"
 echo "[*] Building image (this may take 5-10 minutes)..."
 
-cmd_json=$(cat <<'EOF'
+DEPLOY_DIR="${DEPLOY_DIR:-/home/${DEPLOY_USER:-ec2-user}/cdc-on-ec2-docker}"
+cmd_json=$(cat <<EOF
 {
   "commands": [
-    "cd /home/ec2-user/cdc-on-ec2-docker",
-    "source .env && export HTTP_PROXY HTTPS_PROXY NO_PROXY && DOCKER_BUILDKIT=0 docker compose --env-file .env -f docker-compose.connect-build.yml build",
-    "docker images | grep cdc-connect"
-  ]
+    "cd ${DEPLOY_DIR} && source ${DEPLOY_DIR}/.env && export HTTP_PROXY HTTPS_PROXY NO_PROXY && DOCKER_BUILDKIT=0 docker compose --env-file ${DEPLOY_DIR}/.env -f docker-compose.connect-build.yml build && docker images | grep cdc-connect"
+  ],
+  "executionTimeout": ["900"]
 }
 EOF
 )
