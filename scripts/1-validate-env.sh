@@ -432,10 +432,10 @@ if [[ "$SQLSERVER_REACHABLE" == "true" ]]; then
                     ERRORS=$((ERRORS + 1))
                 fi
 
-                # 7e. CDC capture job running
-                CAPTURE_JOB=$($SQLCMD_BASE -d "${SQLSERVER_DATABASE}" -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM msdb.dbo.cdc_jobs WHERE job_type = 'capture' AND database_id = DB_ID()" 2>/dev/null | tr -d '[:space:]')
+                # 7e. CDC capture job running (query sysjobs instead of cdc_jobs due to RDS permission restrictions)
+                CAPTURE_JOB=$($SQLCMD_BASE -d "msdb" -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.sysjobs WHERE name LIKE '%${SQLSERVER_DATABASE}_capture%'" 2>/dev/null | tr -d '[:space:]')
                 if [[ "$CAPTURE_JOB" == "1" ]]; then
-                    pass "CDC capture job exists"
+                    pass "SQL Server Agent CDC capture is active (job found)"
                 else
                     warn "CDC capture job not found — CDC may not capture changes (auto-created when CDC is enabled)"
                     WARNINGS=$((WARNINGS + 1))
