@@ -1,0 +1,45 @@
+{
+  "name": "jdbc-sink-aurora",
+  "config": {
+    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
+    "tasks.max": "${JDBC_SINK_AURORA_TASKS_MAX}",
+    "batch.size": "${JDBC_SINK_AURORA_BATCH_SIZE}",
+
+    "connection.url": "jdbc:postgresql://${AURORA_HOST}:${AURORA_PORT}/${AURORA_DATABASE}",
+    "connection.username": "${AURORA_USER}",
+    "connection.password": "${AURORA_PASSWORD}",
+
+    "topics.regex": "${JDBC_SINK_AURORA_TOPICS_REGEX}",
+
+    "insert.mode": "upsert",
+    "primary.key.mode": "record_key",
+    "schema.evolution": "basic",
+    "delete.enabled": "false",
+
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
+
+    "transforms": "unwrap,routeTopics",
+
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "true",
+    "transforms.unwrap.delete.handling.mode": "drop",
+
+    "transforms.routeTopics.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.routeTopics.regex": "${JDBC_SINK_AURORA_TOPIC_REGEX}",
+    "transforms.routeTopics.replacement": "$1",
+
+    "consumer.override.fetch.max.wait.ms": "10",
+    "consumer.override.fetch.min.bytes": "1",
+    "consumer.override.metadata.max.age.ms": "30000",
+
+    "errors.tolerance": "none",
+    "errors.deadletterqueue.topic.name": "dlq-jdbc-sink-aurora",
+    "errors.deadletterqueue.topic.replication.factor": "${KAFKA_REPLICATION_FACTOR}",
+    "errors.deadletterqueue.context.headers.enable": "true",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true"
+  }
+}

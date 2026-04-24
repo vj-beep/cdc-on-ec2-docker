@@ -1,0 +1,32 @@
+# ============================================================
+# Build Compose File for Custom Connect Image
+# ============================================================
+# ONLY used to build the cdc-connect image
+# with Debezium + JDBC connectors + custom SMTs
+#
+# Usage:
+#   docker compose -f docker-compose.connect-build.yml build
+#
+# Do NOT use this file with `docker compose up`
+# Use only: docker compose -f docker-compose.yml -f docker-compose.connect-schema-registry.yml up -d
+# ============================================================
+
+services:
+
+  # Build custom Connect image with Debezium + JDBC plugins + SMTs
+  connect-1:
+    build:
+      context: .
+      dockerfile: connect/Dockerfile
+      args:
+        CP_VERSION: ${CP_VERSION:-8.0.0}
+        DEBEZIUM_HUB_VERSION: ${DEBEZIUM_HUB_VERSION:-3.2.6}
+        DEBEZIUM_VERSION: ${DEBEZIUM_VERSION:-3.2.6.Final}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
+        PROXY_HOST: ${PROXY_HOST:-}
+        PROXY_PORT: ${PROXY_PORT:-8080}
+    image: cdc-connect:${CP_VERSION:-8.0.0}
+
+  # connect-2 uses the same image as connect-1 — no separate build needed

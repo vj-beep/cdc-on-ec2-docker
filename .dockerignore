@@ -1,0 +1,25 @@
+# Standard excludes for Docker builds
+.git
+.gitignore
+.gitattributes
+.github
+.gitlab-ci.yml
+.travis.yml
+.drone.yml
+.circleci
+.vscode
+*.md
+LICENSE
+LEARNINGS.md
+.env
+.env.backup.*
+.env.local
+*.log
+.DS_Store
+
+# Exclude large directories but NOT connect/jars (required for build)
+aws/
+db-prep/
+docs/
+profiles/
+monitoring/docs/

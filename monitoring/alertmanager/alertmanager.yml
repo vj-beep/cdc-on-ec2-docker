@@ -1,0 +1,98 @@
+# Alertmanager Configuration for CDC deployment
+#
+# This is a basic configuration with placeholder receivers.
+# Customize the receivers section for your notification channels.
+#
+# Documentation: https://prometheus.io/docs/alerting/latest/configuration/
+
+global:
+  resolve_timeout: 5m
+  # smtp_smarthost: 'smtp.example.com:587'
+  # smtp_from: 'alertmanager@example.com'
+  # smtp_auth_username: 'alertmanager@example.com'
+  # smtp_auth_password: '${SMTP_PASSWORD}'
+
+route:
+  # Default receiver for all alerts
+  receiver: "default-webhook"
+
+  # Group alerts by these labels to reduce notification noise
+  group_by:
+    - alertname
+    - severity
+    - node
+
+  # How long to wait before sending a notification for a new group
+  group_wait: 30s
+
+  # How long to wait before sending notifications about new alerts
+  # added to a group for which an initial notification has already been sent
+  group_interval: 5m
+
+  # How long to wait before re-sending a notification for a firing alert
+  repeat_interval: 4h
+
+  # Child routes for severity-based routing
+  routes:
+    - match:
+        severity: critical
+      receiver: "default-webhook"
+      group_wait: 10s
+      repeat_interval: 1h
+
+    - match:
+        severity: warning
+      receiver: "default-webhook"
+      group_wait: 1m
+      repeat_interval: 4h
+
+receivers:
+  # ---------------------------------------------------------------
+  # Default receiver — logs alerts but takes no action.
+  # Replace with your actual notification channel (Slack, PagerDuty,
+  # email) using one of the examples below.
+  # ---------------------------------------------------------------
+  - name: "default-webhook"
+
+  # ---------------------------------------------------------------
+  # Slack Configuration (uncomment and configure)
+  # ---------------------------------------------------------------
+  # - name: "slack-critical"
+  #   slack_configs:
+  #     - api_url: "${SLACK_WEBHOOK_URL}"
+  #       channel: "#cdc-alerts"
+  #       title: '{{ template "slack.title" . }}'
+  #       text: '{{ template "slack.text" . }}'
+  #       send_resolved: true
+  #       color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+
+  # ---------------------------------------------------------------
+  # PagerDuty Configuration (uncomment and configure)
+  # ---------------------------------------------------------------
+  # - name: "pagerduty-critical"
+  #   pagerduty_configs:
+  #     - service_key: "${PAGERDUTY_SERVICE_KEY}"
+  #       severity: '{{ .CommonLabels.severity }}'
+  #       description: '{{ .CommonAnnotations.summary }}'
+
+  # ---------------------------------------------------------------
+  # Email Configuration (uncomment and configure)
+  # Requires global smtp_* settings above
+  # ---------------------------------------------------------------
+  # - name: "email-alerts"
+  #   email_configs:
+  #     - to: "team@example.com"
+  #       send_resolved: true
+  #       headers:
+  #         Subject: '[CDC-POC] {{ .Status | toUpper }} - {{ .CommonLabels.alertname }}'
+
+# Inhibition rules: suppress lower-severity alerts when a higher-severity
+# alert is already firing for the same target
+inhibit_rules:
+  - source_match:
+      severity: "critical"
+    target_match:
+      severity: "warning"
+    equal:
+      - alertname
+      - node

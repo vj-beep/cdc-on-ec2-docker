@@ -1,0 +1,141 @@
+# Prometheus Configuration for CDC POC Confluent Platform
+#
+# This file uses ${VAR} placeholders that are resolved by envsubst
+# when 5-start-node.sh starts the monitor node. Do NOT manually
+# replace these — they are auto-populated from .env.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+rule_files:
+  - "alert-rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "localhost:9093"
+
+scrape_configs:
+  # ---------------------------------------------------------------
+  # Prometheus self-monitoring
+  # ---------------------------------------------------------------
+  - job_name: "prometheus"
+    static_configs:
+      - targets:
+            - "localhost:9090"
+        labels:
+          instance_name: "monitor-1"
+
+  # ---------------------------------------------------------------
+  # Kafka Brokers (JMX Exporter on port 9404)
+  # Nodes 1, 2, 3 — brokers only (no other services)
+  # ---------------------------------------------------------------
+  - job_name: "kafka-brokers"
+    static_configs:
+      - targets:
+            - "${BROKER_1_IP}:9404"
+        labels:
+          broker_id: "1"
+          node: "node-1"
+      - targets:
+            - "${BROKER_2_IP}:9404"
+        labels:
+          broker_id: "2"
+          node: "node-2"
+      - targets:
+            - "${BROKER_3_IP}:9404"
+        labels:
+          broker_id: "3"
+          node: "node-3"
+
+  # ---------------------------------------------------------------
+  # Kafka Connect Workers (JMX Exporter)
+  # Both workers run on Node 4 (CONNECT_1_IP).
+  # Connect Worker 1 (forward): JMX on port 9404
+  # Connect Worker 2 (reverse): JMX on port 9405
+  # ---------------------------------------------------------------
+  - job_name: "kafka-connect"
+    static_configs:
+      - targets:
+            - "${CONNECT_1_IP}:9404"
+        labels:
+          worker: "connect-forward"
+          node: "node-4"
+      - targets:
+            - "${CONNECT_1_IP}:9405"
+        labels:
+          worker: "connect-reverse"
+          node: "node-4"
+
+  # ---------------------------------------------------------------
+  # Schema Registry (JMX Exporter on port 9406)
+  # Runs on Node 4 alongside Connect workers.
+  # ---------------------------------------------------------------
+  - job_name: "schema-registry"
+    static_configs:
+      - targets:
+            - "${CONNECT_1_IP}:9406"
+        labels:
+          node: "node-4"
+
+  # ---------------------------------------------------------------
+  # Node Exporter (port 9100) — all 5 nodes
+  # ---------------------------------------------------------------
+  - job_name: "node-exporter"
+    static_configs:
+      - targets:
+            - "${BROKER_1_IP}:9100"
+        labels:
+          node: "node-1"
+          role: "broker"
+      - targets:
+            - "${BROKER_2_IP}:9100"
+        labels:
+          node: "node-2"
+          role: "broker"
+      - targets:
+            - "${BROKER_3_IP}:9100"
+        labels:
+          node: "node-3"
+          role: "broker"
+      - targets:
+            - "${CONNECT_1_IP}:9100"
+        labels:
+          node: "node-4"
+          role: "connect-schema-registry"
+      - targets:
+            - "${MONITOR_1_IP}:9100"
+        labels:
+          node: "node-5"
+          role: "monitoring"
+
+  # ---------------------------------------------------------------
+  # cAdvisor (port 9080) — all 5 nodes
+  # Using port 9080 to avoid conflict with Grafana (8080) or other
+  # services. Configure cAdvisor with --port=9080 in docker-compose.
+  # ---------------------------------------------------------------
+  - job_name: "cadvisor"
+    static_configs:
+      - targets:
+            - "${BROKER_1_IP}:9080"
+        labels:
+          node: "node-1"
+      - targets:
+            - "${BROKER_2_IP}:9080"
+        labels:
+          node: "node-2"
+      - targets:
+            - "${BROKER_3_IP}:9080"
+        labels:
+          node: "node-3"
+      - targets:
+            - "${CONNECT_1_IP}:9080"
+        labels:
+          node: "node-4"
+      - targets:
+            - "${MONITOR_1_IP}:9080"
+        labels:
+          node: "node-5"

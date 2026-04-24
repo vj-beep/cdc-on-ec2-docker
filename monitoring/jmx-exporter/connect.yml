@@ -1,0 +1,405 @@
+# JMX Exporter Configuration for Kafka Connect Workers (CP 8.0.0 / Kafka 4.0)
+#
+# IMPORTANT: JMX Exporter 1.0.1 behavioral notes:
+#   - whitelistObjectNames and rules are INCOMPATIBLE — use one or the other
+#   - Type string key order follows MBean REGISTRATION order (not alphabetical)
+#   - Connect MBeans: type first, then connector, task
+#   - Debezium SQL Server MBeans: type first, then server, task, context[, database]
+#   - Debezium PostgreSQL MBeans: type first, then context, server (no task, no database)
+#   - Attribute names use hyphens (connect) or CamelCase (debezium)
+#   - Non-numeric attributes (boolean/string) have ": value" appended to match string
+#   - Use ([^,]+) for mid-position keys, ([^>]+) for last key before ><>
+#
+# Mount this file into the Connect container and set:
+#   Connect Worker 1 (forward):
+#     EXTRA_ARGS: "-javaagent:/etc/jmx-exporter/jmx_prometheus_javaagent.jar=9404:/etc/jmx-exporter/connect.yml"
+#   Connect Worker 2 (reverse):
+#     EXTRA_ARGS: "-javaagent:/etc/jmx-exporter/jmx_prometheus_javaagent.jar=9405:/etc/jmx-exporter/connect.yml"
+
+startDelaySeconds: 0
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+rules:
+  # ---------------------------------------------------------------
+  # Debezium SQL Server Metrics (with database key)
+  #
+  # Type string format:
+  #   debezium.sql_server<type=connector-metrics, server=X, task=N,
+  #     context=CTX, database=DB><>AttributeName
+  # ---------------------------------------------------------------
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>MilliSecondsBehindSource"
+    name: debezium_metrics_milliseconds_behind_source
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>MilliSecondsSinceLastEvent"
+    name: debezium_metrics_milliseconds_since_last_event
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>TotalNumberOfEventsSeen"
+    name: debezium_metrics_total_number_of_events_seen
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>TotalNumberOfCreateEventsSeen"
+    name: debezium_metrics_total_number_of_create_events_seen
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>TotalNumberOfUpdateEventsSeen"
+    name: debezium_metrics_total_number_of_update_events_seen
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>TotalNumberOfDeleteEventsSeen"
+    name: debezium_metrics_total_number_of_delete_events_seen
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>NumberOfErroneousEvents"
+    name: debezium_metrics_number_of_erroneous_events
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>NumberOfEventsFiltered"
+    name: debezium_metrics_number_of_events_filtered
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>NumberOfCommittedTransactions"
+    name: debezium_metrics_number_of_committed_transactions
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>QueueRemainingCapacity"
+    name: debezium_metrics_queue_remaining_capacity
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>QueueTotalCapacity"
+    name: debezium_metrics_queue_total_capacity
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>RemainingTableCount"
+    name: debezium_metrics_remaining_table_count
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>TotalTableCount"
+    name: debezium_metrics_total_table_count
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>RowsScanned"
+    name: debezium_metrics_rows_scanned
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  # Catch-all for SQL Server (with database) — numeric attributes only
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>([^:]+)"
+    name: debezium_metrics_$5
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      database: "$4"
+      plugin: "sqlserver"
+
+  # Debezium SQL Server — without database key (schema-history, queue metrics)
+  - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^>]+)><>([^:]+)"
+    name: debezium_metrics_$4
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+      context: "$3"
+      plugin: "sqlserver"
+
+  # ---------------------------------------------------------------
+  # Debezium PostgreSQL Metrics
+  #
+  # In Debezium 3.x the PostgreSQL connector uses a 4-arg metricName()
+  # overload that omits the task ID, producing:
+  #   debezium.postgres:type=connector-metrics,context=<ctx>,server=<topic_prefix>
+  # No "task" or "database" key — unlike SQL Server.
+  # Key ORDER confirmed from live MBeans: type first, context second, server third.
+  # ---------------------------------------------------------------
+  - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>MilliSecondsBehindSource"
+    name: debezium_metrics_milliseconds_behind_source
+    type: GAUGE
+    labels:
+      context: "$1"
+      connector: "$2"
+      plugin: "postgres"
+
+  - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>MilliSecondsSinceLastEvent"
+    name: debezium_metrics_milliseconds_since_last_event
+    type: GAUGE
+    labels:
+      context: "$1"
+      connector: "$2"
+      plugin: "postgres"
+
+  - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>TotalNumberOfCreateEventsSeen"
+    name: debezium_metrics_total_number_of_create_events_seen
+    type: GAUGE
+    labels:
+      context: "$1"
+      connector: "$2"
+      plugin: "postgres"
+
+  - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>TotalNumberOfUpdateEventsSeen"
+    name: debezium_metrics_total_number_of_update_events_seen
+    type: GAUGE
+    labels:
+      context: "$1"
+      connector: "$2"
+      plugin: "postgres"
+
+  - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>TotalNumberOfDeleteEventsSeen"
+    name: debezium_metrics_total_number_of_delete_events_seen
+    type: GAUGE
+    labels:
+      context: "$1"
+      connector: "$2"
+      plugin: "postgres"
+
+  - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>NumberOfErroneousEvents"
+    name: debezium_metrics_number_of_erroneous_events
+    type: GAUGE
+    labels:
+      context: "$1"
+      connector: "$2"
+      plugin: "postgres"
+
+  - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>NumberOfEventsFiltered"
+    name: debezium_metrics_number_of_events_filtered
+    type: GAUGE
+    labels:
+      context: "$1"
+      connector: "$2"
+      plugin: "postgres"
+
+  # Catch-all PostgreSQL — captures all remaining numeric attributes
+  - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>([^:]+)"
+    name: debezium_metrics_$3
+    type: GAUGE
+    labels:
+      context: "$1"
+      connector: "$2"
+      plugin: "postgres"
+
+  # ---------------------------------------------------------------
+  # Connect Worker Metrics (per-connector)
+  # MBean: kafka.connect<type=connect-worker-metrics, connector=X><>attr
+  # Rename to kafka_connect_connector_metrics_* for dashboard compatibility
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.connect<type=connect-worker-metrics, connector=([^>]+)><>([^:]+)"
+    name: kafka_connect_connector_metrics_$2
+    type: GAUGE
+    labels:
+      connector: "$1"
+
+  # Connect Worker Metrics (global)
+  - pattern: "kafka\\.connect<type=connect-worker-metrics><>([^:]+)"
+    name: kafka_connect_connect_worker_metrics_$1
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # Connect Worker Rebalance Metrics
+  # MBean: kafka.connect<type=connect-worker-rebalance-metrics><>attr
+  # Attributes: offset-commit-avg-time-ms, offset-commit-max-time-ms,
+  #   rebalance-latency-avg, rebalance-latency-max, completed-rebalances-total,
+  #   epoch, leader-name, rebalance-revocations-total
+  #
+  # Dashboard queries:
+  #   kafka_connect_worker_rebalance_offset_commit_avg_time_ms
+  #   kafka_connect_worker_rebalance_completed_rebalances_total
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.connect<type=connect-worker-rebalance-metrics><>([^:]+)"
+    name: kafka_connect_worker_rebalance_$1
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # Sink Task Metrics
+  # MBean: kafka.connect<type=sink-task-metrics, connector=X, task=N><>attr
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.connect<type=sink-task-metrics, connector=([^,]+), task=([^>]+)><>([^:]+)"
+    name: kafka_connect_sink_task_metrics_$3
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+
+  # ---------------------------------------------------------------
+  # Source Task Metrics
+  # MBean: kafka.connect<type=source-task-metrics, connector=X, task=N><>attr
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.connect<type=source-task-metrics, connector=([^,]+), task=([^>]+)><>([^:]+)"
+    name: kafka_connect_source_task_metrics_$3
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+
+  # ---------------------------------------------------------------
+  # Task Error Metrics
+  # MBean: kafka.connect<type=task-error-metrics, connector=X, task=N><>attr
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.connect<type=task-error-metrics, connector=([^,]+), task=([^>]+)><>([^:]+)"
+    name: kafka_connect_task_error_metrics_$3
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+
+  # ---------------------------------------------------------------
+  # Task Metrics (general — running ratio, etc.)
+  # MBean: kafka.connect<type=task-metrics, connector=X, task=N><>attr
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.connect<type=task-metrics, connector=([^,]+), task=([^>]+)><>([^:]+)"
+    name: kafka_connect_task_metrics_$3
+    type: GAUGE
+    labels:
+      connector: "$1"
+      task: "$2"
+
+  # ---------------------------------------------------------------
+  # Consumer Fetch Manager Metrics (per-partition — lag tracking)
+  # MBean: kafka.consumer<type=consumer-fetch-manager-metrics,
+  #         client-id=X, topic=Y, partition=Z><>records-lag
+  # ---------------------------------------------------------------
+  - pattern: "kafka\\.consumer<type=consumer-fetch-manager-metrics, client-id=([^,]+), topic=([^,]+), partition=([^>]+)><>([^:]+)"
+    name: kafka_consumer_consumer_fetch_manager_metrics_$4
+    type: GAUGE
+    labels:
+      client_id: "$1"
+      topic: "$2"
+      partition: "$3"
+
+  # Consumer Fetch Manager — aggregate (no topic/partition)
+  - pattern: "kafka\\.consumer<type=consumer-fetch-manager-metrics, client-id=([^>]+)><>([^:]+)"
+    name: kafka_consumer_consumer_fetch_manager_metrics_$2
+    type: GAUGE
+    labels:
+      client_id: "$1"
+
+  # ---------------------------------------------------------------
+  # JVM Memory Metrics
+  # ---------------------------------------------------------------
+  - pattern: "java\\.lang<type=Memory><HeapMemoryUsage>(.+)"
+    name: jvm_memory_heap_$1
+    type: GAUGE
+
+  - pattern: "java\\.lang<type=Memory><NonHeapMemoryUsage>(.+)"
+    name: jvm_memory_nonheap_$1
+    type: GAUGE
+
+  - pattern: "java\\.lang<type=MemoryPool, name=([^>]+)><Usage>(.+)"
+    name: jvm_memory_pool_$2
+    type: GAUGE
+    labels:
+      pool: "$1"
+
+  # ---------------------------------------------------------------
+  # JVM Garbage Collection Metrics
+  # ---------------------------------------------------------------
+  - pattern: "java\\.lang<type=GarbageCollector, name=([^>]+)><>CollectionCount"
+    name: jvm_gc_collection_count
+    type: COUNTER
+    labels:
+      gc: "$1"
+
+  - pattern: "java\\.lang<type=GarbageCollector, name=([^>]+)><>CollectionTime"
+    name: jvm_gc_collection_time_ms
+    type: COUNTER
+    labels:
+      gc: "$1"
+
+  # ---------------------------------------------------------------
+  # JVM Threading Metrics
+  # ---------------------------------------------------------------
+  - pattern: "java\\.lang<type=Threading><>([^:]+)"
+    name: jvm_threading_$1
+    type: GAUGE
+
+  # ---------------------------------------------------------------
+  # JVM OS Metrics
+  # ---------------------------------------------------------------
+  - pattern: "java\\.lang<type=OperatingSystem><>([^:]+)"
+    name: jvm_os_$1
+    type: GAUGE

@@ -1,0 +1,43 @@
+{
+  "name": "debezium-postgres-source",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+
+    "database.hostname": "${AURORA_HOST}",
+    "database.port": "${AURORA_PORT}",
+    "database.user": "${AURORA_USER}",
+    "database.password": "${AURORA_PASSWORD}",
+    "database.dbname": "${AURORA_DATABASE}",
+    "table.include.list": "${AURORA_TABLE_INCLUDE_LIST}",
+
+    "topic.prefix": "${AURORA_TOPIC_PREFIX}",
+    "schema.include.list": "${AURORA_SCHEMA_INCLUDE_LIST}",
+    "message.key.columns": "${AURORA_MESSAGE_KEY_COLUMNS}",
+    "plugin.name": "pgoutput",
+    "slot.name": "${PG_SLOT_NAME}",
+    "publication.name": "${PG_PUBLICATION_NAME}",
+    "publication.autocreate.mode": "filtered",
+
+    "topic.creation.default.replication.factor": "${KAFKA_REPLICATION_FACTOR}",
+    "topic.creation.default.partitions": "${KAFKA_DEFAULT_PARTITIONS}",
+    "topic.creation.default.cleanup.policy": "delete",
+    "topic.creation.default.retention.ms": "${KAFKA_TOPIC_RETENTION_MS}",
+
+    "snapshot.mode": "${AURORA_SOURCE_SNAPSHOT_MODE}",
+    "snapshot.fetch.size": "${AURORA_SOURCE_SNAPSHOT_FETCH_SIZE}",
+
+    "poll.interval.ms": "${AURORA_SOURCE_POLL_INTERVAL_MS}",
+    "max.batch.size": "${AURORA_SOURCE_MAX_BATCH_SIZE}",
+    "max.queue.size": "${AURORA_SOURCE_MAX_QUEUE_SIZE}",
+    "max.queue.size.in.bytes": "${AURORA_SOURCE_MAX_QUEUE_SIZE_IN_BYTES}",
+
+    "key.converter": "io.confluent.connect.avro.AvroConverter",
+    "key.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
+
+    "producer.override.linger.ms": "0",
+    "producer.override.max.request.size": "${CONNECT_PRODUCER_MAX_REQUEST_SIZE}"
+  }
+}
