@@ -260,13 +260,13 @@ for var in JDBC_SINK_AURORA_TOPICS_REGEX JDBC_SINK_SQLSERVER_TOPICS_REGEX; do
             WARNINGS=$((WARNINGS + 1))
             CONVENTION_ISSUES=$((CONVENTION_ISSUES + 1))
         fi
-        # Should NOT be quoted
-        if [[ "$raw" == \'* ]] || [[ "$raw" == \"* ]]; then
-            fail "$var should NOT be quoted (quotes become part of the regex value)"
+        # Must be single-quoted (contains parentheses that break 'source .env')
+        if [[ "$raw" == \'* ]]; then
+            pass "$var is single-quoted (protects parentheses from bash)"
+        else
+            fail "$var must be single-quoted (unquoted parentheses break 'source .env')"
             ERRORS=$((ERRORS + 1))
             CONVENTION_ISSUES=$((CONVENTION_ISSUES + 1))
-        else
-            pass "$var is unquoted (correct)"
         fi
     fi
 done
