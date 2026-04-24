@@ -237,6 +237,7 @@ case $NODE in
         echo "⚠️  .env or prometheus.yml.template not found — Prometheus may not scrape correctly"
     fi
 
+    bash monitoring/jmx-exporter/download-jmx-agent.sh
     docker compose -f docker-compose.yml -f docker-compose.ksqldb-monitoring.yml \
       up -d control-center ksqldb-server rest-proxy flink-jobmanager flink-taskmanager \
       prometheus grafana alertmanager node-exporter cadvisor
