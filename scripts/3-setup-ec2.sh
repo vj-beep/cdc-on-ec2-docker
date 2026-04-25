@@ -459,8 +459,8 @@ SUMMARY+=("Set file descriptor limits to 100000")
 # 6. Install useful tools
 # ---------------------------------------------------------------------------
 info "Installing useful utilities..."
-dnf install -y git jq nmap-ncat nvme-cli htop iotop sysstat 2>/dev/null || true
-SUMMARY+=("Installed git, jq, ncat, nvme-cli, htop, iotop, sysstat")
+dnf install -y git jq nmap-ncat nvme-cli htop iotop sysstat gettext 2>/dev/null || true
+SUMMARY+=("Installed git, jq, ncat, nvme-cli, htop, iotop, sysstat, gettext")
 
 # ---------------------------------------------------------------------------
 # Summary
