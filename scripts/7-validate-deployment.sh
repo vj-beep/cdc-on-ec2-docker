@@ -452,29 +452,9 @@ else
     fi
 
     # --- 7b. Node exporter + cAdvisor on all 5 nodes ---
-    info "7b. Node Exporter and cAdvisor (all nodes)"
-
-    INFRA_TARGETS=(
-        "${BROKER_1_IP}:9100:Node Exporter node-1"
-        "${BROKER_2_IP}:9100:Node Exporter node-2"
-        "${BROKER_3_IP}:9100:Node Exporter node-3"
-        "${CONNECT_1_IP}:9100:Node Exporter node-4"
-        "${MONITOR_IP}:9100:Node Exporter node-5"
-        "${BROKER_1_IP}:9080:cAdvisor node-1"
-        "${BROKER_2_IP}:9080:cAdvisor node-2"
-        "${BROKER_3_IP}:9080:cAdvisor node-3"
-        "${CONNECT_1_IP}:9080:cAdvisor node-4"
-        "${MONITOR_IP}:9080:cAdvisor node-5"
-    )
-
-    for entry in "${INFRA_TARGETS[@]}"; do
-        IFS=':' read -r t_host t_port t_label <<< "$entry"
-        if nc -z -w 3 "$t_host" "$t_port" 2>/dev/null; then
-            pass "${t_label} (${t_host}:${t_port}) reachable"
-        else
-            warn "${t_label} (${t_host}:${t_port}) not reachable"
-        fi
-    done
+    # These ports (9100, 9080) are typically only reachable within the VPC,
+    # not from the jumpbox. Check via Prometheus targets API instead of direct nc.
+    info "7b. Node Exporter and cAdvisor (checked via Prometheus targets in 7d)"
 
     # --- 7c. Prometheus health and template rendering ---
     info "7c. Prometheus (${MONITOR_IP}:${PROM_PORT})"
@@ -492,7 +472,8 @@ else
 
     if $PROM_REACHABLE; then
         PROM_READY=$(curl -s --max-time 5 "${PROM_URL}/-/ready" 2>/dev/null || echo "")
-        if [[ "$PROM_READY" == *"ready"* ]]; then
+        PROM_READY_LOWER=$(echo "$PROM_READY" | tr '[:upper:]' '[:lower:]')
+        if [[ "$PROM_READY_LOWER" == *"ready"* ]]; then
             pass "Prometheus is ready"
         else
             fail "Prometheus not ready (/-/ready returned: ${PROM_READY:-empty})"
@@ -556,7 +537,7 @@ else
         info "7e. Prometheus metric data check"
 
         # Broker metrics
-        BROKER_RESULT=$(curl -s --max-time 5 "${PROM_URL}/api/v1/query?query=up{job=\"kafka-brokers\"}" 2>/dev/null || echo "")
+        BROKER_RESULT=$(curl -sg --max-time 5 "${PROM_URL}/api/v1/query?query=up{job=\"kafka-brokers\"}" 2>/dev/null || echo "")
         BROKER_UP=$(echo "$BROKER_RESULT" | jq '.data.result | length' 2>/dev/null || echo "0")
         if [[ "$BROKER_UP" -gt 0 ]]; then
             pass "Broker metrics flowing (${BROKER_UP} broker series in Prometheus)"
@@ -565,7 +546,7 @@ else
         fi
 
         # Connect metrics
-        CONNECT_RESULT=$(curl -s --max-time 5 "${PROM_URL}/api/v1/query?query=up{job=\"kafka-connect\"}" 2>/dev/null || echo "")
+        CONNECT_RESULT=$(curl -sg --max-time 5 "${PROM_URL}/api/v1/query?query=up{job=\"kafka-connect\"}" 2>/dev/null || echo "")
         CONNECT_UP=$(echo "$CONNECT_RESULT" | jq '.data.result | length' 2>/dev/null || echo "0")
         if [[ "$CONNECT_UP" -gt 0 ]]; then
             pass "Connect metrics flowing (${CONNECT_UP} worker series in Prometheus)"
@@ -574,7 +555,7 @@ else
         fi
 
         # Debezium CDC lag metric (key dashboard metric)
-        LAG_RESULT=$(curl -s --max-time 5 "${PROM_URL}/api/v1/query?query=debezium_metrics_milliseconds_behind_source" 2>/dev/null || echo "")
+        LAG_RESULT=$(curl -sg --max-time 5 "${PROM_URL}/api/v1/query?query=debezium_metrics_milliseconds_behind_source" 2>/dev/null || echo "")
         LAG_SERIES=$(echo "$LAG_RESULT" | jq '.data.result | length' 2>/dev/null || echo "0")
         if [[ "$LAG_SERIES" -gt 0 ]]; then
             pass "Debezium CDC lag metric present (${LAG_SERIES} series)"
@@ -587,7 +568,7 @@ else
         fi
 
         # Node exporter metrics
-        NODE_RESULT=$(curl -s --max-time 5 "${PROM_URL}/api/v1/query?query=up{job=\"node-exporter\"}" 2>/dev/null || echo "")
+        NODE_RESULT=$(curl -sg --max-time 5 "${PROM_URL}/api/v1/query?query=up{job=\"node-exporter\"}" 2>/dev/null || echo "")
         NODE_UP=$(echo "$NODE_RESULT" | jq '.data.result | length' 2>/dev/null || echo "0")
         if [[ "$NODE_UP" -gt 0 ]]; then
             pass "Node exporter metrics flowing (${NODE_UP}/5 nodes)"
@@ -606,8 +587,9 @@ else
         pass "Grafana port reachable (${MONITOR_IP}:${GRAF_PORT})"
         GRAF_REACHABLE=true
     else
-        fail "Grafana not reachable (${MONITOR_IP}:${GRAF_PORT})"
-        info "  Fix: on node 5, check 'docker ps | grep grafana' — if not running, re-run 5-start-node.sh monitor"
+        warn "Grafana not reachable from jumpbox (${MONITOR_IP}:${GRAF_PORT}) — port may not be open to jumpbox SG"
+        info "  Grafana is typically accessed via SSH tunnel (localhost:3000), not directly from jumpbox"
+        info "  To verify on node 5: docker ps | grep grafana"
     fi
 
     if $GRAF_REACHABLE; then
