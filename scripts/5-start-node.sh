@@ -233,6 +233,21 @@ case $NODE in
         set -a; source "$REPO_DIR/.env"; set +a
         envsubst < "$PROM_TEMPLATE" > "$PROM_OUTPUT"
         echo "✅ prometheus.yml resolved with actual IPs"
+
+        # Resolve ${VAR} placeholders in Grafana dashboard templates
+        # Use explicit variable list so Grafana's own $connector, $sink, $topic are untouched
+        DASH_DIR="$REPO_DIR/monitoring/grafana/dashboards"
+        DASH_VARS='$SQLSERVER_TOPIC_PREFIX $AURORA_TOPIC_PREFIX'
+        if [[ -z "${SQLSERVER_TOPIC_PREFIX:-}" || -z "${AURORA_TOPIC_PREFIX:-}" ]]; then
+            echo "⚠️  SQLSERVER_TOPIC_PREFIX or AURORA_TOPIC_PREFIX not set — dashboard topic filters may be empty"
+        fi
+        for tmpl in "$DASH_DIR"/*.json.template; do
+            [[ -f "$tmpl" ]] || continue
+            out="${tmpl%.template}"
+            echo "📊 Generating $(basename "$out") from template..."
+            envsubst "$DASH_VARS" < "$tmpl" > "$out"
+        done
+        echo "✅ Grafana dashboards resolved with topic prefixes"
     else
         echo "⚠️  .env or prometheus.yml.template not found — Prometheus may not scrape correctly"
     fi

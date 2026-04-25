@@ -1,12 +1,12 @@
 {
-  "uid": "aurora-to-sqlserver-cdc",
-  "title": "Aurora PostgreSQL \u2192 SQL Server CDC Pipeline",
-  "description": "Full pipeline flow: Aurora PostgreSQL \u2192 Debezium Source \u2192 Kafka \u2192 JDBC Sink \u2192 SQL Server. Tracks throughput, lag, latency, and connector failures.",
+  "uid": "sqlserver-to-aurora-cdc",
+  "title": "SQL Server \u2192 Aurora PostgreSQL CDC Pipeline",
+  "description": "Full pipeline flow: SQL Server \u2192 Debezium Source \u2192 Kafka \u2192 JDBC Sink \u2192 Aurora PostgreSQL. Tracks throughput, lag, latency, and connector failures.",
   "tags": [
     "cdc",
     "pipeline",
-    "aurora",
     "sqlserver",
+    "aurora",
     "debezium"
   ],
   "editable": true,
@@ -28,7 +28,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "query": "label_values(debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"postgres\"}, connector)",
+        "query": "label_values(debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"sqlserver\"}, connector)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
@@ -41,7 +41,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "query": "label_values(kafka_connect_sink_task_metrics_sink_record_send_rate{connector=~\"jdbc-sink-sqlserver.*\"}, connector)",
+        "query": "label_values(kafka_connect_sink_task_metrics_sink_record_send_rate{connector=~\"jdbc-sink-aurora.*\"}, connector)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
@@ -54,7 +54,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "query": "label_values(kafka_server_brokertopicmetrics_messagesinpersec{topic=~\"aurora\\\\..*\"}, topic)",
+        "query": "label_values(kafka_server_brokertopicmetrics_messagesinpersec{topic=~\"${SQLSERVER_TOPIC_PREFIX}\\\\..*\"}, topic)",
         "refresh": 2,
         "includeAll": true,
         "multi": true,
@@ -78,7 +78,7 @@
     {
       "type": "stat",
       "title": "Active Controller",
-      "description": "KRaft active controller count. Must be exactly 1.",
+      "description": "KRaft active controller count across the cluster. Must be exactly 1. 0 = cluster frozen.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -158,6 +158,7 @@
     {
       "type": "stat",
       "title": "Events Filtered",
+      "description": "Events skipped by table.include.list filter. High values mean connector is processing irrelevant traffic.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -171,7 +172,7 @@
       "id": 203,
       "targets": [
         {
-          "expr": "sum(debezium_metrics_number_of_events_filtered{context=\"streaming\",plugin=\"postgres\",connector=~\"$connector\"})",
+          "expr": "sum(debezium_metrics_number_of_events_filtered{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"})",
           "legendFormat": "Filtered",
           "refId": "A"
         }
@@ -212,6 +213,7 @@
     {
       "type": "stat",
       "title": "DLQ Total",
+      "description": "Total records in Dead Letter Queue. Any value > 0 needs investigation.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -225,7 +227,7 @@
       "id": 206,
       "targets": [
         {
-          "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec{topic=\"dlq-jdbc-sink-sqlserver\"}) or vector(0)",
+          "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec{topic=\"dlq-jdbc-sink-aurora\"}) or vector(0)",
           "legendFormat": "DLQ",
           "refId": "A"
         }
@@ -368,7 +370,7 @@
       "id": 1,
       "targets": [
         {
-          "expr": "sum(kafka_connect_connector_metrics_connector_failed_task_count{connector=~\"debezium-postgres.*\"})",
+          "expr": "sum(kafka_connect_connector_metrics_connector_failed_task_count{connector=~\"debezium-sqlserver.*\"})",
           "legendFormat": "Failed Tasks",
           "refId": "A"
         }
@@ -478,7 +480,7 @@
       "id": 5,
       "targets": [
         {
-          "expr": "sum(kafka_connect_connector_metrics_connector_failed_task_count{connector=~\"jdbc-sink-sqlserver.*\"})",
+          "expr": "sum(kafka_connect_connector_metrics_connector_failed_task_count{connector=~\"jdbc-sink-aurora.*\"})",
           "legendFormat": "Failed Tasks",
           "refId": "A"
         }
@@ -530,7 +532,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Source Throughput (Aurora \u2192 Kafka)",
+      "title": "Source Throughput (SQL Server \u2192 Kafka)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -605,7 +607,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Sink Throughput (Kafka \u2192 SQL Server)",
+      "title": "Sink Throughput (Kafka \u2192 Aurora)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -620,7 +622,7 @@
       "targets": [
         {
           "expr": "sum(kafka_connect_sink_task_metrics_sink_record_send_rate{connector=~\"$sink\"})",
-          "legendFormat": "Records/s Sent",
+          "legendFormat": "Records/s Sent to Aurora",
           "refId": "A"
         },
         {
@@ -686,17 +688,17 @@
       "id": 19,
       "targets": [
         {
-          "expr": "rate(debezium_metrics_total_number_of_create_events_seen{context=\"streaming\",plugin=\"postgres\",connector=~\"$connector\"}[5m])",
+          "expr": "rate(debezium_metrics_total_number_of_create_events_seen{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
           "legendFormat": "Inserts/s",
           "refId": "A"
         },
         {
-          "expr": "rate(debezium_metrics_total_number_of_update_events_seen{context=\"streaming\",plugin=\"postgres\",connector=~\"$connector\"}[5m])",
+          "expr": "rate(debezium_metrics_total_number_of_update_events_seen{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
           "legendFormat": "Updates/s",
           "refId": "B"
         },
         {
-          "expr": "rate(debezium_metrics_total_number_of_delete_events_seen{context=\"streaming\",plugin=\"postgres\",connector=~\"$connector\"}[5m])",
+          "expr": "rate(debezium_metrics_total_number_of_delete_events_seen{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
           "legendFormat": "Deletes/s",
           "refId": "C"
         }
@@ -756,7 +758,7 @@
       "id": 9,
       "targets": [
         {
-          "expr": "debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"postgres\",connector=~\"$connector\"} / 1000",
+          "expr": "debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"} / 1000",
           "legendFormat": "{{ connector }}",
           "refId": "A"
         }
@@ -812,7 +814,7 @@
     {
       "type": "timeseries",
       "title": "Consumer Lag per Partition (Skew Detection)",
-      "description": "Lag per partition. Uneven distribution indicates hot key or partition imbalance.",
+      "description": "Lag per partition. If one partition has 10k+ lag and others are 0, you have a hot key issue.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -826,7 +828,7 @@
       "id": 10,
       "targets": [
         {
-          "expr": "kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-sqlserver.*\"}",
+          "expr": "kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-aurora.*\"}",
           "legendFormat": "{{ topic }}/{{ partition }}",
           "refId": "A"
         }
@@ -875,7 +877,7 @@
     {
       "type": "timeseries",
       "title": "Sink Batch Write Latency (ms)",
-      "description": "Average and max time to write a batch to SQL Server. >5000ms = DB bottleneck or deadlock.",
+      "description": "Average time to write a batch to Aurora. >5000ms = DB bottleneck. Tracks batching efficiency.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -946,6 +948,7 @@
     {
       "type": "timeseries",
       "title": "Debezium Event Processing Time",
+      "description": "Time since last event. If this grows while lag is stable, source DB has no new changes (idle).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -959,7 +962,7 @@
       "id": 14,
       "targets": [
         {
-          "expr": "debezium_metrics_milliseconds_since_last_event{context=\"streaming\",plugin=\"postgres\",connector=~\"$connector\"}",
+          "expr": "debezium_metrics_milliseconds_since_last_event{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}",
           "legendFormat": "{{ connector }}",
           "refId": "A"
         }
@@ -1016,12 +1019,12 @@
       "id": 15,
       "targets": [
         {
-          "expr": "rate(debezium_metrics_number_of_erroneous_events{context=\"streaming\",plugin=\"postgres\",connector=~\"$connector\"}[5m])",
+          "expr": "rate(debezium_metrics_number_of_erroneous_events{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
           "legendFormat": "Erroneous Events/s",
           "refId": "A"
         },
         {
-          "expr": "rate(debezium_metrics_number_of_skipped_events{context=\"streaming\",plugin=\"postgres\",connector=~\"$connector\"}[5m])",
+          "expr": "rate(debezium_metrics_number_of_skipped_events{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
           "legendFormat": "Skipped Events/s",
           "refId": "B"
         }
@@ -1076,7 +1079,7 @@
           "refId": "B"
         },
         {
-          "expr": "sum(rate(kafka_server_brokertopicmetrics_messagesinpersec{topic=\"dlq-jdbc-sink-sqlserver\"}[5m]))",
+          "expr": "sum(rate(kafka_server_brokertopicmetrics_messagesinpersec{topic=\"dlq-jdbc-sink-aurora\"}[5m]))",
           "legendFormat": "DLQ Topic/s",
           "refId": "C"
         }
@@ -1478,7 +1481,7 @@
       },
       "targets": [
         {
-          "expr": "avg_over_time(debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"postgres\",connector=~\"$connector\"}[1h]) / 1000",
+          "expr": "avg_over_time(debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[1h]) / 1000",
           "legendFormat": "1h avg",
           "refId": "A",
           "instant": true
@@ -1501,7 +1504,7 @@
       "id": 92,
       "targets": [
         {
-          "expr": "avg_over_time(debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"postgres\",connector=~\"$connector\"}[15m]) / 1000",
+          "expr": "avg_over_time(debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[15m]) / 1000",
           "legendFormat": "15m avg",
           "refId": "A",
           "instant": true

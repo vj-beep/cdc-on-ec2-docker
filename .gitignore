@@ -12,8 +12,10 @@
 !connect/jars/mssql-jdbc-*.jar
 monitoring/jmx-exporter/*.jar
 
-# Generated prometheus config (resolved from .template by 5-start-node.sh)
+# Generated configs (resolved from .template by 5-start-node.sh)
 monitoring/prometheus/prometheus.yml
+monitoring/grafana/dashboards/sqlserver-to-aurora-cdc.json
+monitoring/grafana/dashboards/aurora-to-sqlserver-cdc.json
 
 # Generated remediation scripts (customer-specific, contain hostnames)
 db-prep/remediation-*.sql
