@@ -25,13 +25,13 @@ rules:
   # ---------------------------------------------------------------
   - pattern: kafka.server<type=BrokerTopicMetrics, name=(.+), topic=(.+)><>Count
     name: kafka_server_brokertopicmetrics_$1
-    type: GAUGE
+    type: COUNTER
     labels:
       topic: "$2"
 
   - pattern: kafka.server<type=BrokerTopicMetrics, name=(.+)><>Count
     name: kafka_server_brokertopicmetrics_$1
-    type: GAUGE
+    type: COUNTER
 
   # Also export OneMinuteRate for instant throughput (no rate() needed)
   - pattern: kafka.server<type=BrokerTopicMetrics, name=(.+), topic=(.+)><>OneMinuteRate

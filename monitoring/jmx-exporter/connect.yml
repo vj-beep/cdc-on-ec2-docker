@@ -50,7 +50,7 @@ rules:
 
   - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>TotalNumberOfEventsSeen"
     name: debezium_metrics_total_number_of_events_seen
-    type: GAUGE
+    type: COUNTER
     labels:
       connector: "$1"
       task: "$2"
@@ -60,7 +60,7 @@ rules:
 
   - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>TotalNumberOfCreateEventsSeen"
     name: debezium_metrics_total_number_of_create_events_seen
-    type: GAUGE
+    type: COUNTER
     labels:
       connector: "$1"
       task: "$2"
@@ -70,7 +70,7 @@ rules:
 
   - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>TotalNumberOfUpdateEventsSeen"
     name: debezium_metrics_total_number_of_update_events_seen
-    type: GAUGE
+    type: COUNTER
     labels:
       connector: "$1"
       task: "$2"
@@ -80,7 +80,7 @@ rules:
 
   - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>TotalNumberOfDeleteEventsSeen"
     name: debezium_metrics_total_number_of_delete_events_seen
-    type: GAUGE
+    type: COUNTER
     labels:
       connector: "$1"
       task: "$2"
@@ -90,7 +90,7 @@ rules:
 
   - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>NumberOfErroneousEvents"
     name: debezium_metrics_number_of_erroneous_events
-    type: GAUGE
+    type: COUNTER
     labels:
       connector: "$1"
       task: "$2"
@@ -100,7 +100,7 @@ rules:
 
   - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>NumberOfEventsFiltered"
     name: debezium_metrics_number_of_events_filtered
-    type: GAUGE
+    type: COUNTER
     labels:
       connector: "$1"
       task: "$2"
@@ -110,7 +110,7 @@ rules:
 
   - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>NumberOfCommittedTransactions"
     name: debezium_metrics_number_of_committed_transactions
-    type: GAUGE
+    type: COUNTER
     labels:
       connector: "$1"
       task: "$2"
@@ -160,7 +160,7 @@ rules:
 
   - pattern: "debezium\\.sql_server<type=connector-metrics, server=([^,]+), task=([^,]+), context=([^,]+), database=([^>]+)><>RowsScanned"
     name: debezium_metrics_rows_scanned
-    type: GAUGE
+    type: COUNTER
     labels:
       connector: "$1"
       task: "$2"
@@ -216,7 +216,7 @@ rules:
 
   - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>TotalNumberOfCreateEventsSeen"
     name: debezium_metrics_total_number_of_create_events_seen
-    type: GAUGE
+    type: COUNTER
     labels:
       context: "$1"
       connector: "$2"
@@ -224,7 +224,7 @@ rules:
 
   - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>TotalNumberOfUpdateEventsSeen"
     name: debezium_metrics_total_number_of_update_events_seen
-    type: GAUGE
+    type: COUNTER
     labels:
       context: "$1"
       connector: "$2"
@@ -232,7 +232,7 @@ rules:
 
   - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>TotalNumberOfDeleteEventsSeen"
     name: debezium_metrics_total_number_of_delete_events_seen
-    type: GAUGE
+    type: COUNTER
     labels:
       context: "$1"
       connector: "$2"
@@ -240,7 +240,7 @@ rules:
 
   - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>NumberOfErroneousEvents"
     name: debezium_metrics_number_of_erroneous_events
-    type: GAUGE
+    type: COUNTER
     labels:
       context: "$1"
       connector: "$2"
@@ -248,7 +248,7 @@ rules:
 
   - pattern: "debezium\\.postgres<type=connector-metrics, context=([^,]+), server=([^>]+)><>NumberOfEventsFiltered"
     name: debezium_metrics_number_of_events_filtered
-    type: GAUGE
+    type: COUNTER
     labels:
       context: "$1"
       connector: "$2"
