@@ -8,6 +8,7 @@
 #   - Schema Registry
 #   - DLQ topics (should be empty)
 #   - Consumer lag
+#   - Monitoring pipeline (JMX exporters, Prometheus, Grafana, Alertmanager)
 #
 # NOTE: Data path tests (forward/reverse CDC, loop prevention) are NOT
 # included here — they require customer-specific table configuration.
@@ -61,6 +62,7 @@ REQUIRED_VARS=(
     BROKER_2_IP
     BROKER_3_IP
     CONNECT_1_IP
+    MONITOR_1_IP
     SQLSERVER_HOST
     SQLSERVER_PORT
     SQLSERVER_USER
@@ -397,6 +399,298 @@ else
             fi
         fi
     done <<< "${CONSUMER_GROUPS}"
+fi
+
+# ---------------------------------------------------------------------------
+# 7. Monitoring Pipeline (Prometheus + Grafana)
+# ---------------------------------------------------------------------------
+section "Monitoring Pipeline"
+
+MONITOR_IP="${MONITOR_1_IP:-}"
+PROM_PORT="${PROMETHEUS_PORT:-9090}"
+GRAF_PORT="${GRAFANA_PORT:-3000}"
+GRAF_PASS="${GRAFANA_ADMIN_PASSWORD:-admin}"
+
+if [[ -z "$MONITOR_IP" ]]; then
+    warn "MONITOR_1_IP not set — skipping monitoring checks"
+else
+
+    # --- 7a. JMX exporter endpoints on nodes 1-4 ---
+    info "7a. JMX Exporter endpoints (nodes 1-4)"
+
+    JMX_TARGETS=(
+        "${BROKER_1_IP}:9404:Broker 1 JMX"
+        "${BROKER_2_IP}:9404:Broker 2 JMX"
+        "${BROKER_3_IP}:9404:Broker 3 JMX"
+        "${CONNECT_1_IP}:9404:Connect Forward JMX"
+        "${CONNECT_1_IP}:9405:Connect Reverse JMX"
+        "${CONNECT_1_IP}:9406:Schema Registry JMX"
+    )
+
+    JMX_FAILURES=0
+    for entry in "${JMX_TARGETS[@]}"; do
+        IFS=':' read -r jmx_host jmx_port jmx_label <<< "$entry"
+        if nc -z -w 3 "$jmx_host" "$jmx_port" 2>/dev/null; then
+            SAMPLE=$(curl -s --max-time 5 "http://${jmx_host}:${jmx_port}/metrics" 2>/dev/null | head -1)
+            if [[ "$SAMPLE" == *"#"* || "$SAMPLE" == *"jvm"* || "$SAMPLE" == *"kafka"* ]]; then
+                pass "${jmx_label} (${jmx_host}:${jmx_port}) returning metrics"
+            else
+                fail "${jmx_label} (${jmx_host}:${jmx_port}) port open but no Prometheus metrics"
+                info "  Likely cause: jmx_prometheus_javaagent.jar missing — run download-jmx-agent.sh on that node and restart the container"
+                JMX_FAILURES=$((JMX_FAILURES + 1))
+            fi
+        else
+            fail "${jmx_label} (${jmx_host}:${jmx_port}) not reachable"
+            info "  Likely cause: container not running, or jmx_prometheus_javaagent.jar was missing at startup"
+            info "  Fix: verify JAR exists at ~/cdc-on-ec2-docker/monitoring/jmx-exporter/jmx_prometheus_javaagent.jar, then restart"
+            JMX_FAILURES=$((JMX_FAILURES + 1))
+        fi
+    done
+
+    if [[ $JMX_FAILURES -gt 0 ]]; then
+        warn "  $JMX_FAILURES JMX endpoint(s) down — Grafana dashboards will show gaps for those components"
+    fi
+
+    # --- 7b. Node exporter + cAdvisor on all 5 nodes ---
+    info "7b. Node Exporter and cAdvisor (all nodes)"
+
+    INFRA_TARGETS=(
+        "${BROKER_1_IP}:9100:Node Exporter node-1"
+        "${BROKER_2_IP}:9100:Node Exporter node-2"
+        "${BROKER_3_IP}:9100:Node Exporter node-3"
+        "${CONNECT_1_IP}:9100:Node Exporter node-4"
+        "${MONITOR_IP}:9100:Node Exporter node-5"
+        "${BROKER_1_IP}:9080:cAdvisor node-1"
+        "${BROKER_2_IP}:9080:cAdvisor node-2"
+        "${BROKER_3_IP}:9080:cAdvisor node-3"
+        "${CONNECT_1_IP}:9080:cAdvisor node-4"
+        "${MONITOR_IP}:9080:cAdvisor node-5"
+    )
+
+    for entry in "${INFRA_TARGETS[@]}"; do
+        IFS=':' read -r t_host t_port t_label <<< "$entry"
+        if nc -z -w 3 "$t_host" "$t_port" 2>/dev/null; then
+            pass "${t_label} (${t_host}:${t_port}) reachable"
+        else
+            warn "${t_label} (${t_host}:${t_port}) not reachable"
+        fi
+    done
+
+    # --- 7c. Prometheus health and template rendering ---
+    info "7c. Prometheus (${MONITOR_IP}:${PROM_PORT})"
+
+    PROM_URL="http://${MONITOR_IP}:${PROM_PORT}"
+    PROM_REACHABLE=false
+
+    if nc -z -w 3 "$MONITOR_IP" "$PROM_PORT" 2>/dev/null; then
+        pass "Prometheus port reachable (${MONITOR_IP}:${PROM_PORT})"
+        PROM_REACHABLE=true
+    else
+        fail "Prometheus not reachable (${MONITOR_IP}:${PROM_PORT})"
+        info "  Fix: on node 5, check 'docker ps | grep prometheus' — if not running, re-run 5-start-node.sh monitor"
+    fi
+
+    if $PROM_REACHABLE; then
+        PROM_READY=$(curl -s --max-time 5 "${PROM_URL}/-/ready" 2>/dev/null || echo "")
+        if [[ "$PROM_READY" == *"ready"* ]]; then
+            pass "Prometheus is ready"
+        else
+            fail "Prometheus not ready (/-/ready returned: ${PROM_READY:-empty})"
+        fi
+    fi
+
+    # Check prometheus.yml was rendered (no unresolved ${VAR} placeholders)
+    if $PROM_REACHABLE; then
+        PROM_CONFIG=$(curl -s --max-time 5 "${PROM_URL}/api/v1/status/config" 2>/dev/null || echo "")
+        if echo "$PROM_CONFIG" | grep -q '\${BROKER_1_IP}\|\${CONNECT_1_IP}\|\${MONITOR_1_IP}'; then
+            fail "prometheus.yml has unresolved \${VAR} placeholders — template was not rendered"
+            info "  Fix: on node 5, install gettext (dnf install -y gettext), then re-run 5-start-node.sh monitor"
+        elif [[ -n "$PROM_CONFIG" ]]; then
+            pass "prometheus.yml rendered correctly (no unresolved placeholders)"
+        fi
+    fi
+
+    # --- 7d. Prometheus scrape targets health ---
+    if $PROM_REACHABLE; then
+        info "7d. Prometheus scrape target health"
+
+        TARGETS_JSON=$(curl -s --max-time 10 "${PROM_URL}/api/v1/targets" 2>/dev/null || echo "")
+
+        if [[ -z "$TARGETS_JSON" ]]; then
+            fail "Cannot query Prometheus targets API"
+        else
+            TOTAL_TARGETS=$(echo "$TARGETS_JSON" | jq '.data.activeTargets | length' 2>/dev/null || echo "0")
+            UP_TARGETS=$(echo "$TARGETS_JSON" | jq '[.data.activeTargets[] | select(.health == "up")] | length' 2>/dev/null || echo "0")
+            DOWN_TARGETS=$(echo "$TARGETS_JSON" | jq '[.data.activeTargets[] | select(.health == "down")] | length' 2>/dev/null || echo "0")
+
+            if [[ "$DOWN_TARGETS" -eq 0 && "$TOTAL_TARGETS" -gt 0 ]]; then
+                pass "All Prometheus targets healthy (${UP_TARGETS}/${TOTAL_TARGETS} up)"
+            elif [[ "$TOTAL_TARGETS" -eq 0 ]]; then
+                fail "Prometheus has 0 scrape targets — prometheus.yml may be empty or misconfigured"
+            else
+                warn "${UP_TARGETS}/${TOTAL_TARGETS} targets up, ${DOWN_TARGETS} down"
+            fi
+
+            # Show each down target with its error
+            if [[ "$DOWN_TARGETS" -gt 0 ]]; then
+                echo "$TARGETS_JSON" | jq -r '.data.activeTargets[] | select(.health == "down") | "    \(.labels.job) \(.labels.instance // .scrapeUrl) — \(.lastError)"' 2>/dev/null | while IFS= read -r line; do
+                    info "  DOWN: $line"
+                done
+            fi
+
+            # Per-job summary
+            info "  Per-job breakdown:"
+            echo "$TARGETS_JSON" | jq -r '
+                [.data.activeTargets[] | {job: .labels.job, health}]
+                | group_by(.job)
+                | .[]
+                | "    \(.[0].job): \([.[] | select(.health == "up")] | length)/\(length) up"
+            ' 2>/dev/null | while IFS= read -r line; do
+                echo -e "  ${CYAN}[INFO]${NC}  $line"
+            done
+        fi
+    fi
+
+    # --- 7e. Prometheus has actual metric data ---
+    if $PROM_REACHABLE; then
+        info "7e. Prometheus metric data check"
+
+        # Broker metrics
+        BROKER_RESULT=$(curl -s --max-time 5 "${PROM_URL}/api/v1/query?query=up{job=\"kafka-brokers\"}" 2>/dev/null || echo "")
+        BROKER_UP=$(echo "$BROKER_RESULT" | jq '.data.result | length' 2>/dev/null || echo "0")
+        if [[ "$BROKER_UP" -gt 0 ]]; then
+            pass "Broker metrics flowing (${BROKER_UP} broker series in Prometheus)"
+        else
+            fail "No broker metrics in Prometheus — JMX exporters on nodes 1-3 may be down"
+        fi
+
+        # Connect metrics
+        CONNECT_RESULT=$(curl -s --max-time 5 "${PROM_URL}/api/v1/query?query=up{job=\"kafka-connect\"}" 2>/dev/null || echo "")
+        CONNECT_UP=$(echo "$CONNECT_RESULT" | jq '.data.result | length' 2>/dev/null || echo "0")
+        if [[ "$CONNECT_UP" -gt 0 ]]; then
+            pass "Connect metrics flowing (${CONNECT_UP} worker series in Prometheus)"
+        else
+            fail "No Connect metrics in Prometheus — JMX exporters on node 4 may be down"
+        fi
+
+        # Debezium CDC lag metric (key dashboard metric)
+        LAG_RESULT=$(curl -s --max-time 5 "${PROM_URL}/api/v1/query?query=debezium_metrics_milliseconds_behind_source" 2>/dev/null || echo "")
+        LAG_SERIES=$(echo "$LAG_RESULT" | jq '.data.result | length' 2>/dev/null || echo "0")
+        if [[ "$LAG_SERIES" -gt 0 ]]; then
+            pass "Debezium CDC lag metric present (${LAG_SERIES} series)"
+            echo "$LAG_RESULT" | jq -r '.data.result[] | "    \(.metric.context // "unknown") \(.metric.plugin // "") — \(.value[1])ms behind"' 2>/dev/null | while IFS= read -r line; do
+                info "$line"
+            done
+        else
+            warn "Debezium CDC lag metric not found — connectors may not be in streaming mode yet"
+            info "  This is expected during initial snapshot; metric appears after snapshot completes"
+        fi
+
+        # Node exporter metrics
+        NODE_RESULT=$(curl -s --max-time 5 "${PROM_URL}/api/v1/query?query=up{job=\"node-exporter\"}" 2>/dev/null || echo "")
+        NODE_UP=$(echo "$NODE_RESULT" | jq '.data.result | length' 2>/dev/null || echo "0")
+        if [[ "$NODE_UP" -gt 0 ]]; then
+            pass "Node exporter metrics flowing (${NODE_UP}/5 nodes)"
+        else
+            warn "No node-exporter metrics in Prometheus"
+        fi
+    fi
+
+    # --- 7f. Grafana health ---
+    info "7f. Grafana (${MONITOR_IP}:${GRAF_PORT})"
+
+    GRAF_URL="http://${MONITOR_IP}:${GRAF_PORT}"
+    GRAF_REACHABLE=false
+
+    if nc -z -w 3 "$MONITOR_IP" "$GRAF_PORT" 2>/dev/null; then
+        pass "Grafana port reachable (${MONITOR_IP}:${GRAF_PORT})"
+        GRAF_REACHABLE=true
+    else
+        fail "Grafana not reachable (${MONITOR_IP}:${GRAF_PORT})"
+        info "  Fix: on node 5, check 'docker ps | grep grafana' — if not running, re-run 5-start-node.sh monitor"
+    fi
+
+    if $GRAF_REACHABLE; then
+        GRAF_HEALTH=$(curl -s --max-time 5 "${GRAF_URL}/api/health" 2>/dev/null || echo "")
+        GRAF_DB=$(echo "$GRAF_HEALTH" | jq -r '.database // "unknown"' 2>/dev/null)
+        if [[ "$GRAF_DB" == "ok" ]]; then
+            pass "Grafana health check passed (database: ok)"
+        else
+            fail "Grafana health check failed: ${GRAF_HEALTH:-no response}"
+        fi
+    fi
+
+    # --- 7g. Grafana datasource connectivity ---
+    if $GRAF_REACHABLE; then
+        info "7g. Grafana datasource and dashboard check"
+
+        DS_RESPONSE=$(curl -s --max-time 5 -u "admin:${GRAF_PASS}" "${GRAF_URL}/api/datasources" 2>/dev/null || echo "[]")
+        DS_COUNT=$(echo "$DS_RESPONSE" | jq 'length' 2>/dev/null || echo "0")
+
+        if [[ "$DS_COUNT" -eq 0 ]]; then
+            fail "Grafana has 0 datasources — provisioning may have failed"
+            info "  Check: docker logs grafana 2>&1 | grep -i 'datasource\\|provision\\|error'"
+        else
+            pass "Grafana has ${DS_COUNT} datasource(s) configured"
+        fi
+
+        PROM_DS=$(echo "$DS_RESPONSE" | jq -r '.[] | select(.type == "prometheus") | .name' 2>/dev/null || echo "")
+        if [[ -n "$PROM_DS" ]]; then
+            pass "Prometheus datasource found: ${PROM_DS}"
+
+            PROM_DS_UID=$(echo "$DS_RESPONSE" | jq -r '.[] | select(.type == "prometheus") | .uid' 2>/dev/null || echo "")
+            if [[ -n "$PROM_DS_UID" ]]; then
+                DS_TEST=$(curl -s --max-time 10 -u "admin:${GRAF_PASS}" \
+                    "${GRAF_URL}/api/datasources/uid/${PROM_DS_UID}/health" 2>/dev/null || echo "")
+                DS_STATUS=$(echo "$DS_TEST" | jq -r '.status // empty' 2>/dev/null)
+
+                if [[ "$DS_STATUS" == "OK" ]]; then
+                    pass "Grafana -> Prometheus datasource connectivity: OK"
+                else
+                    fail "Grafana -> Prometheus datasource connectivity failed"
+                    DS_MSG=$(echo "$DS_TEST" | jq -r '.message // empty' 2>/dev/null)
+                    if [[ -n "$DS_MSG" ]]; then
+                        info "  Error: $DS_MSG"
+                    fi
+                    info "  Check: Grafana datasource URL is http://localhost:9090 and Prometheus is running"
+                fi
+            fi
+        else
+            fail "No Prometheus datasource in Grafana — dashboards will show no data"
+            info "  Check: monitoring/grafana/provisioning/datasources/prometheus.yml exists and Grafana was restarted"
+        fi
+
+        # Check dashboards are loaded
+        DASH_SEARCH=$(curl -s --max-time 5 -u "admin:${GRAF_PASS}" \
+            "${GRAF_URL}/api/search?type=dash-db" 2>/dev/null || echo "[]")
+        DASH_COUNT=$(echo "$DASH_SEARCH" | jq 'length' 2>/dev/null || echo "0")
+
+        if [[ "$DASH_COUNT" -ge 2 ]]; then
+            pass "Grafana dashboards loaded (${DASH_COUNT} found)"
+            echo "$DASH_SEARCH" | jq -r '.[].title' 2>/dev/null | while IFS= read -r title; do
+                info "  Dashboard: $title"
+            done
+        elif [[ "$DASH_COUNT" -eq 0 ]]; then
+            fail "No dashboards in Grafana — provisioning failed"
+            info "  Fix: delete grafana-data volume and restart: docker volume rm cdc-on-ec2-docker_grafana-data"
+        else
+            warn "Only ${DASH_COUNT} dashboard(s) found (expected 2: forward + reverse CDC)"
+        fi
+    fi
+
+    # --- 7h. Alertmanager ---
+    info "7h. Alertmanager (${MONITOR_IP}:9093)"
+
+    if nc -z -w 3 "$MONITOR_IP" 9093 2>/dev/null; then
+        AM_HEALTH=$(curl -s --max-time 5 "${PROM_URL//:${PROM_PORT}/:9093}/-/ready" 2>/dev/null || echo "")
+        if [[ "$AM_HEALTH" == *"OK"* || -n "$AM_HEALTH" ]]; then
+            pass "Alertmanager reachable and ready"
+        else
+            warn "Alertmanager port open but health check unclear"
+        fi
+    else
+        warn "Alertmanager not reachable (${MONITOR_IP}:9093) — alerts will not fire"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
