@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# 7-validate-poc.sh — Infrastructure Validation for CDC deployment
+# 7-validate-deployment.sh — Infrastructure Validation for CDC deployment
 #
 # Validates infrastructure readiness and service health:
 #   - Infrastructure connectivity (brokers, Connect, Schema Registry, DBs)
@@ -15,7 +15,7 @@
 # Set VALIDATE_* variables in .env and use a separate data validation script.
 #
 # Usage:
-#   ./scripts/7-validate-poc.sh
+#   ./scripts/7-validate-deployment.sh
 #
 # Requires: Environment variables set (from .env) or passed directly.
 # =============================================================================

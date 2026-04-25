@@ -18,7 +18,7 @@ Common commands for deploying, operating, and troubleshooting the CDC pipeline.
 ./scripts/5-start-node.sh connect             # Start Connect + Schema Registry (Node 4)
 ./scripts/5-start-node.sh monitor             # Start monitoring stack (Node 5)
 ./scripts/6-deploy-connectors.sh              # Deploy 4 CDC connectors
-./scripts/7-validate-poc.sh                   # Validate infrastructure
+./scripts/7-validate-deployment.sh                   # Validate infrastructure
 ```
 
 ## Connector Management

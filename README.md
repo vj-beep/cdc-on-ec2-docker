@@ -146,7 +146,7 @@ Aurora PostgreSQL ──→ Debezium Source ──→ Kafka Topics ──→ JDB
 | **4** | `./scripts/4-build-connect.sh` | Build custom Connect image | 5-10 min |
 | **5** | `./scripts/5-start-node.sh` | Start services on each node | 1-5 min/node |
 | **6** | `./scripts/6-deploy-connectors.sh` | Deploy 4 CDC connectors | 2 min |
-| **7** | `./scripts/7-validate-poc.sh` | End-to-end CDC validation | 5-10 min |
+| **7** | `./scripts/7-validate-deployment.sh` | End-to-end CDC validation | 5-10 min |
 
 **Helper scripts (on-demand):**
 

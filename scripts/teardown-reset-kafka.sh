@@ -99,7 +99,7 @@ Order of operations:
 
 After reset:
   ./scripts/6-deploy-connectors.sh    # redeploy connectors
-  ./scripts/7-validate-poc.sh         # validate
+  ./scripts/7-validate-deployment.sh         # validate
 EOF
       exit 0
       ;;
@@ -387,6 +387,6 @@ else
   echo -e "  Brokers running, Connect workers restarted, topics/groups/subjects cleaned."
   echo -e "  Next steps:"
   echo -e "    1. ${BOLD}./scripts/6-deploy-connectors.sh${NC}  — redeploy connectors"
-  echo -e "    2. ${BOLD}./scripts/7-validate-poc.sh${NC}       — validate infrastructure"
+  echo -e "    2. ${BOLD}./scripts/7-validate-deployment.sh${NC}       — validate infrastructure"
 fi
 echo ""

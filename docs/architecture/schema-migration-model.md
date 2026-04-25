@@ -221,7 +221,7 @@ CREATE INDEX idx_orders_created_date ON orders (created_date);
 Proceed with standard deployment:
 ```bash
 ./scripts/6-deploy-connectors.sh      # Deploy Debezium + JDBC connectors
-./scripts/7-validate-poc.sh           # Verify connectors running
+./scripts/7-validate-deployment.sh           # Verify connectors running
 ```
 
 Debezium captures all rows from source and streams to Kafka. JDBC Sink writes to target efficiently.

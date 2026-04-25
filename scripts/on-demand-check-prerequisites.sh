@@ -81,7 +81,7 @@ SCRIPTS=(
     "scripts/4-build-connect.sh"
     "scripts/5-start-node.sh"
     "scripts/6-deploy-connectors.sh"
-    "scripts/7-validate-poc.sh"
+    "scripts/7-validate-deployment.sh"
     "scripts/on-demand-check-prerequisites.sh"
     "scripts/on-demand-switch-profile.sh"
     "scripts/ops-health-check.sh"

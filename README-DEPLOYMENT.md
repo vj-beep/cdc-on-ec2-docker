@@ -37,7 +37,7 @@ Scripts run from **any machine with SSH access** to the nodes. Multi-node script
 | **4** | SSH into Node 4 | `bash scripts/4-build-connect.sh --local` |
 | **5** | SSH into target node | `bash scripts/5-start-node.sh --local <node>` |
 | **6** | SSH into Node 4 | `./scripts/6-deploy-connectors.sh` |
-| **7** | SSH into Node 4 | `./scripts/7-validate-poc.sh` |
+| **7** | SSH into Node 4 | `./scripts/7-validate-deployment.sh` |
 
 > **Proxy required in both modes.** No direct internet egress is assumed — Docker pulls, `dnf` installs, and Maven downloads all route through `HTTP_PROXY`/`HTTPS_PROXY`. Set these in `.env` before deployment.
 
@@ -55,7 +55,7 @@ Scripts run from **any machine with SSH access** to the nodes. Multi-node script
 | **4** | `4-build-connect.sh` | Build custom Connect image with Debezium + JDBC | 5-10 min |
 | **5** | `5-start-node.sh` | Start services (brokers → connect → monitor) | 1-5 min/node |
 | **6** | `6-deploy-connectors.sh` | Deploy 4 CDC connectors via REST API | 2 min |
-| **7** | `7-validate-poc.sh` | Validate infrastructure, connectors, DLQ, consumer lag | 2-5 min |
+| **7** | `7-validate-deployment.sh` | Validate infrastructure, connectors, DLQ, consumer lag | 2-5 min |
 
 **Total time:** ~30-40 minutes
 
@@ -476,7 +476,7 @@ Waits for each connector to report `RUNNING` state before proceeding.
 ### Phase 7: Validate Infrastructure
 
 ```bash
-./scripts/7-validate-poc.sh
+./scripts/7-validate-deployment.sh
 ```
 
 Validates infrastructure and service health:
@@ -610,7 +610,7 @@ After running: `./scripts/6-deploy-connectors.sh` to redeploy.
 ./scripts/5-start-node.sh connect
 ./scripts/5-start-node.sh monitor
 ./scripts/6-deploy-connectors.sh
-./scripts/7-validate-poc.sh
+./scripts/7-validate-deployment.sh
 ```
 
 ### SSH mode (`DISPATCH_MODE=ssh`, `SSH_KEY_PATH=~/.ssh/id_rsa`)
@@ -637,7 +637,7 @@ ssh -i ~/.ssh/id_rsa ec2-user@<broker1-ip>
 
 # From Node 4 (or any node that can reach Connect REST API):
 ./scripts/6-deploy-connectors.sh
-./scripts/7-validate-poc.sh
+./scripts/7-validate-deployment.sh
 ```
 
 ### Post-deployment (both modes)

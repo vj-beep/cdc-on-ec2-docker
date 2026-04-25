@@ -32,7 +32,7 @@ Complete guide to deploying and operating Kafka Connect for bi-directional CDC b
 1. **Deploy infrastructure** (Terraform): `aws/ → terraform apply`
 2. **Generate `.env`**: `scripts/generate-env.sh`
 3. **Run phases 0-7**: Sequential deployment from jumpbox
-4. **Validate**: `scripts/7-validate-poc.sh` + data path tests
+4. **Validate**: `scripts/7-validate-deployment.sh` + data path tests
 5. **Monitor**: Grafana dashboards (Broker health, CDC latency, DLQ status)
 
 ---
