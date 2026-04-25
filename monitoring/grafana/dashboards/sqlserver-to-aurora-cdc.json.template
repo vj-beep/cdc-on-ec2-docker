@@ -424,7 +424,7 @@
       "id": 3,
       "targets": [
         {
-          "expr": "sum(rate(kafka_server_brokertopicmetrics_bytesinpersec{topic=~\"$topic\"}[5m])) / 1048576",
+          "expr": "sum(kafka_server_brokertopicmetrics_bytesinpersec_rate{topic=~\"$topic\"})) / 1048576",
           "legendFormat": "MB/s",
           "refId": "A"
         }
@@ -546,7 +546,7 @@
       "id": 7,
       "targets": [
         {
-          "expr": "sum(rate(kafka_server_brokertopicmetrics_bytesinpersec{topic=~\"$topic\"}[5m]))",
+          "expr": "sum(kafka_server_brokertopicmetrics_bytesinpersec_rate{topic=~\"$topic\"}))",
           "legendFormat": "Bytes/s In",
           "refId": "A"
         },
