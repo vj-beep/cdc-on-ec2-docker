@@ -57,6 +57,7 @@
         "query": "label_values(kafka_server_brokertopicmetrics_messagesinpersec{topic=~\"${AURORA_TOPIC_PREFIX}\\\\..*\"}, topic)",
         "refresh": 2,
         "includeAll": true,
+        "allValue": "${AURORA_TOPIC_PREFIX}\\\\..*",
         "multi": true,
         "current": {}
       }
@@ -225,7 +226,7 @@
       "id": 206,
       "targets": [
         {
-          "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec{topic=\"dlq-jdbc-sink-sqlserver\"}) or vector(0)",
+          "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec{topic=~\"dlq-jdbc-sink-sqlserver.*\"}) or vector(0)",
           "legendFormat": "DLQ",
           "refId": "A"
         }
@@ -368,7 +369,7 @@
       "id": 1,
       "targets": [
         {
-          "expr": "sum(kafka_connect_connector_metrics_connector_failed_task_count{connector=~\"debezium-postgres.*\"})",
+          "expr": "sum(kafka_connect_connector_metrics_connector_failed_task_count{connector=~\"$connector\"})",
           "legendFormat": "Failed Tasks",
           "refId": "A"
         }
@@ -422,7 +423,7 @@
       "id": 3,
       "targets": [
         {
-          "expr": "sum(kafka_server_brokertopicmetrics_bytesinpersec_rate{topic=~\"$topic\"})) / 1048576",
+          "expr": "sum(kafka_server_brokertopicmetrics_bytesinpersec_rate{topic=~\"$topic\"}) / 1048576",
           "legendFormat": "MB/s",
           "refId": "A"
         }
@@ -478,7 +479,7 @@
       "id": 5,
       "targets": [
         {
-          "expr": "sum(kafka_connect_connector_metrics_connector_failed_task_count{connector=~\"jdbc-sink-sqlserver.*\"})",
+          "expr": "sum(kafka_connect_connector_metrics_connector_failed_task_count{connector=~\"$sink\"})",
           "legendFormat": "Failed Tasks",
           "refId": "A"
         }
@@ -544,7 +545,7 @@
       "id": 7,
       "targets": [
         {
-          "expr": "sum(kafka_server_brokertopicmetrics_bytesinpersec_rate{topic=~\"$topic\"}))",
+          "expr": "sum(kafka_server_brokertopicmetrics_bytesinpersec_rate{topic=~\"$topic\"})",
           "legendFormat": "Bytes/s In",
           "refId": "A"
         },
@@ -826,7 +827,7 @@
       "id": 10,
       "targets": [
         {
-          "expr": "kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-sqlserver.*\"}",
+          "expr": "kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-($sink).*\"}",
           "legendFormat": "{{ topic }}/{{ partition }}",
           "refId": "A"
         }
@@ -1076,7 +1077,7 @@
           "refId": "B"
         },
         {
-          "expr": "sum(rate(kafka_server_brokertopicmetrics_messagesinpersec{topic=\"dlq-jdbc-sink-sqlserver\"}[5m]))",
+          "expr": "sum(rate(kafka_server_brokertopicmetrics_messagesinpersec{topic=~\"dlq-jdbc-sink-sqlserver.*\"}[5m]))",
           "legendFormat": "DLQ Topic/s",
           "refId": "C"
         }
