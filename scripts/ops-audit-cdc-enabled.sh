@@ -312,7 +312,8 @@ SELECT
     t.name,
     ct.capture_instance,
     CASE ct.supports_net_changes WHEN 1 THEN 'Yes' ELSE 'No' END,
-    CONVERT(VARCHAR(19), ct.create_date, 120)
+    CONVERT(VARCHAR(19), ct.create_date, 120),
+    ISNULL((SELECT SUM(p.row_count) FROM sys.dm_db_partition_stats p WHERE p.object_id = t.object_id AND p.index_id IN (0,1)), 0)
 FROM cdc.change_tables ct
 JOIN sys.tables t ON ct.source_object_id = t.object_id
 JOIN sys.schemas s ON t.schema_id = s.schema_id
@@ -332,19 +333,20 @@ SQLEOF
   fi
 
   local count=0
-  printf "  ${GREY}%-15s %-30s %-35s %-10s %-20s${NC}\n" "SCHEMA" "TABLE" "CAPTURE_INSTANCE" "NET_CHG" "CDC_ENABLED_AT"
-  printf "  ${GREY}%-15s %-30s %-35s %-10s %-20s${NC}\n" "───────────────" "──────────────────────────────" "───────────────────────────────────" "──────────" "────────────────────"
+  printf "  ${GREY}%-15s %-30s %-35s %-10s %-20s %12s${NC}\n" "SCHEMA" "TABLE" "CAPTURE_INSTANCE" "NET_CHG" "CDC_ENABLED_AT" "ROW_COUNT"
+  printf "  ${GREY}%-15s %-30s %-35s %-10s %-20s %12s${NC}\n" "───────────────" "──────────────────────────────" "───────────────────────────────────" "──────────" "────────────────────" "────────────"
 
-  while IFS='|' read -r col_schema col_table col_instance col_net col_date; do
+  while IFS='|' read -r col_schema col_table col_instance col_net col_date col_rows; do
     col_schema=$(echo "$col_schema" | xargs)
     col_table=$(echo "$col_table" | xargs)
     col_instance=$(echo "$col_instance" | xargs)
     col_net=$(echo "$col_net" | xargs)
     col_date=$(echo "$col_date" | xargs)
+    col_rows=$(echo "$col_rows" | xargs)
 
     [[ -z "$col_schema" || "$col_schema" == "---"* ]] && continue
 
-    printf "  ${GREEN}●${NC} %-14s %-30s %-35s %-10s %-20s\n" "$col_schema" "$col_table" "$col_instance" "$col_net" "$col_date"
+    printf "  ${GREEN}●${NC} %-14s %-30s %-35s %-10s %-20s %12s\n" "$col_schema" "$col_table" "$col_instance" "$col_net" "$col_date" "$col_rows"
     ((count++))
   done <<< "$result"
 
@@ -365,7 +367,8 @@ SET NOCOUNT ON;
 SELECT
     s.name,
     t.name,
-    CASE WHEN pk.object_id IS NOT NULL THEN 'Yes' ELSE 'No' END
+    CASE WHEN pk.object_id IS NOT NULL THEN 'Yes' ELSE 'No' END,
+    ISNULL((SELECT SUM(p.row_count) FROM sys.dm_db_partition_stats p WHERE p.object_id = t.object_id AND p.index_id IN (0,1)), 0)
 FROM sys.tables t
 JOIN sys.schemas s ON t.schema_id = s.schema_id
 LEFT JOIN cdc.change_tables ct ON ct.source_object_id = t.object_id
@@ -385,17 +388,18 @@ SQLEOF
   no_cdc_result=$(SQLCMDPASSWORD="$pass" sqlcmd -S "${host},${port}" -U "$user" -d "$database" -C -h -1 -W -s '|' -Q "$no_cdc_query" 2>&1)
 
   local no_cdc_count=0
-  printf "  ${GREY}%-15s %-30s %-10s${NC}\n" "SCHEMA" "TABLE" "HAS_PK"
-  printf "  ${GREY}%-15s %-30s %-10s${NC}\n" "───────────────" "──────────────────────────────" "──────────"
+  printf "  ${GREY}%-15s %-30s %-10s %12s${NC}\n" "SCHEMA" "TABLE" "HAS_PK" "ROW_COUNT"
+  printf "  ${GREY}%-15s %-30s %-10s %12s${NC}\n" "───────────────" "──────────────────────────────" "──────────" "────────────"
 
-  while IFS='|' read -r col_schema col_table col_pk; do
+  while IFS='|' read -r col_schema col_table col_pk col_rows; do
     col_schema=$(echo "$col_schema" | xargs)
     col_table=$(echo "$col_table" | xargs)
     col_pk=$(echo "$col_pk" | xargs)
+    col_rows=$(echo "$col_rows" | xargs)
 
     [[ -z "$col_schema" || "$col_schema" == "---"* ]] && continue
 
-    printf "  ${GREY}○${NC} %-14s %-30s %-10s\n" "$col_schema" "$col_table" "$col_pk"
+    printf "  ${GREY}○${NC} %-14s %-30s %-10s %12s\n" "$col_schema" "$col_table" "$col_pk" "$col_rows"
     ((no_cdc_count++))
   done <<< "$no_cdc_result"
 
@@ -534,23 +538,27 @@ audit_aurora() {
   local pub_tables
   pub_tables=$(PGPASSWORD="$pass" psql "$connstr" -tA --field-separator='|' -c \
     "SELECT pt.schemaname, pt.tablename,
-            CASE WHEN tc.constraint_type = 'PRIMARY KEY' THEN 'Yes' ELSE 'No' END
+            CASE WHEN tc.constraint_type = 'PRIMARY KEY' THEN 'Yes' ELSE 'No' END,
+            COALESCE(s.n_live_tup, 0)
      FROM pg_publication_tables pt
      LEFT JOIN information_schema.table_constraints tc
        ON tc.table_schema = pt.schemaname
        AND tc.table_name = pt.tablename
        AND tc.constraint_type = 'PRIMARY KEY'
+     LEFT JOIN pg_stat_user_tables s
+       ON s.schemaname = pt.schemaname
+       AND s.relname = pt.tablename
      WHERE pt.pubname = '${publication}'
        AND pt.schemaname = '${schema}'
      ORDER BY pt.schemaname, pt.tablename;" 2>&1)
 
   local count=0
-  printf "  ${GREY}%-15s %-30s %-10s${NC}\n" "SCHEMA" "TABLE" "HAS_PK"
-  printf "  ${GREY}%-15s %-30s %-10s${NC}\n" "───────────────" "──────────────────────────────" "──────────"
+  printf "  ${GREY}%-15s %-30s %-10s %12s${NC}\n" "SCHEMA" "TABLE" "HAS_PK" "ROW_COUNT"
+  printf "  ${GREY}%-15s %-30s %-10s %12s${NC}\n" "───────────────" "──────────────────────────────" "──────────" "────────────"
 
-  while IFS='|' read -r col_schema col_table col_pk; do
+  while IFS='|' read -r col_schema col_table col_pk col_rows; do
     [[ -z "$col_schema" ]] && continue
-    printf "  ${GREEN}●${NC} %-14s %-30s %-10s\n" "$col_schema" "$col_table" "$col_pk"
+    printf "  ${GREEN}●${NC} %-14s %-30s %-10s %12s\n" "$col_schema" "$col_table" "$col_pk" "$col_rows"
     ((count++))
   done <<< "$pub_tables"
 
@@ -568,12 +576,16 @@ audit_aurora() {
   local no_pub_tables
   no_pub_tables=$(PGPASSWORD="$pass" psql "$connstr" -tA --field-separator='|' -c \
     "SELECT t.table_schema, t.table_name,
-            CASE WHEN tc.constraint_type = 'PRIMARY KEY' THEN 'Yes' ELSE 'No' END
+            CASE WHEN tc.constraint_type = 'PRIMARY KEY' THEN 'Yes' ELSE 'No' END,
+            COALESCE(s.n_live_tup, 0)
      FROM information_schema.tables t
      LEFT JOIN information_schema.table_constraints tc
        ON tc.table_schema = t.table_schema
        AND tc.table_name = t.table_name
        AND tc.constraint_type = 'PRIMARY KEY'
+     LEFT JOIN pg_stat_user_tables s
+       ON s.schemaname = t.table_schema
+       AND s.relname = t.table_name
      WHERE t.table_schema = '${schema}'
        AND t.table_type = 'BASE TABLE'
        AND NOT EXISTS (
@@ -585,12 +597,12 @@ audit_aurora() {
      ORDER BY t.table_schema, t.table_name;" 2>&1)
 
   local no_pub_count=0
-  printf "  ${GREY}%-15s %-30s %-10s${NC}\n" "SCHEMA" "TABLE" "HAS_PK"
-  printf "  ${GREY}%-15s %-30s %-10s${NC}\n" "───────────────" "──────────────────────────────" "──────────"
+  printf "  ${GREY}%-15s %-30s %-10s %12s${NC}\n" "SCHEMA" "TABLE" "HAS_PK" "ROW_COUNT"
+  printf "  ${GREY}%-15s %-30s %-10s %12s${NC}\n" "───────────────" "──────────────────────────────" "──────────" "────────────"
 
-  while IFS='|' read -r col_schema col_table col_pk; do
+  while IFS='|' read -r col_schema col_table col_pk col_rows; do
     [[ -z "$col_schema" ]] && continue
-    printf "  ${GREY}○${NC} %-14s %-30s %-10s\n" "$col_schema" "$col_table" "$col_pk"
+    printf "  ${GREY}○${NC} %-14s %-30s %-10s %12s\n" "$col_schema" "$col_table" "$col_pk" "$col_rows"
     ((no_pub_count++))
   done <<< "$no_pub_tables"
 
