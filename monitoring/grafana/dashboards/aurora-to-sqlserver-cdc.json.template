@@ -877,22 +877,6 @@
       "pluginVersion": "10.0.0"
     },
     {
-      "type": "text",
-      "title": "Capturing Tables",
-      "description": "Aurora source tables being captured by CDC (table.include.list) and sink regex pattern subscribing to topics.",
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 10
-      },
-      "id": 22,
-      "options": {
-        "content": "## Aurora \u2192 SQL Server (Reverse Path)\n**Source Tables:** ${AURORA_TABLE_INCLUDE_LIST}\n\n**Sink Regex:** ${JDBC_SINK_SQLSERVER_TOPIC_REGEX}",
-        "mode": "markdown"
-      }
-    },
-    {
       "type": "row",
       "title": "Lag \u2014 End-to-End Replication (SLA)",
       "collapsed": false,
