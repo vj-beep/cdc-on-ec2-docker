@@ -28,6 +28,7 @@
     "snapshot.fetch.size": "${AURORA_SOURCE_SNAPSHOT_FETCH_SIZE}",
 
     "poll.interval.ms": "${AURORA_SOURCE_POLL_INTERVAL_MS}",
+    "heartbeat.interval.ms": "${AURORA_SOURCE_HEARTBEAT_INTERVAL_MS}",
     "max.batch.size": "${AURORA_SOURCE_MAX_BATCH_SIZE}",
     "max.queue.size": "${AURORA_SOURCE_MAX_QUEUE_SIZE}",
     "max.queue.size.in.bytes": "${AURORA_SOURCE_MAX_QUEUE_SIZE_IN_BYTES}",
