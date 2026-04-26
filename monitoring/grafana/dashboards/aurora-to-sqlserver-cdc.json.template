@@ -1253,13 +1253,13 @@
       "id": 24,
       "targets": [
         {
-          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
-          "legendFormat": "CPU {{ instance }}",
+          "expr": "100 - (avg by (node) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+          "legendFormat": "CPU {{ node }}",
           "refId": "A"
         },
         {
           "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
-          "legendFormat": "Mem {{ instance }}",
+          "legendFormat": "Mem {{ node }}",
           "refId": "B"
         }
       ],
