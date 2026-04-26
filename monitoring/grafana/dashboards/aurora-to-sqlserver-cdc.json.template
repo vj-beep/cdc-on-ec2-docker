@@ -1188,7 +1188,7 @@
       "id": 23,
       "targets": [
         {
-          "expr": "(1 - node_filesystem_avail_bytes{mountpoint=\"/data/kafka\"} / node_filesystem_size_bytes{mountpoint=\"/data/kafka\"}) * 100",
+          "expr": "(1 - node_filesystem_avail_bytes{mountpoint=\"/data/kafka\",role=\"broker\"} / node_filesystem_size_bytes{mountpoint=\"/data/kafka\",role=\"broker\"}) * 100",
           "legendFormat": "{{ node }}",
           "refId": "A"
         }
