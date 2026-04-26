@@ -807,7 +807,7 @@
     {
       "type": "stat",
       "title": "CDC-Enabled Tables",
-      "description": "POC configuration: public.products on Aurora. Verify in .env: AURORA_TABLE_INCLUDE_LIST",
+      "description": "Aurora: ${AURORA_TABLE_INCLUDE_LIST} | SQL Server Sink: ${JDBC_SINK_SQLSERVER_TOPIC_REGEX}",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -819,7 +819,6 @@
         "y": 10
       },
       "id": 21,
-      "description": "Aurora: ${AURORA_TABLE_INCLUDE_LIST} | SQL Server Sink: ${JDBC_SINK_SQLSERVER_TOPIC_REGEX}",
       "targets": [
         {
           "expr": "debezium_metrics_remaining_table_count{connector=~\"$connector\",context=\"streaming\",plugin=\"postgres\"}",
