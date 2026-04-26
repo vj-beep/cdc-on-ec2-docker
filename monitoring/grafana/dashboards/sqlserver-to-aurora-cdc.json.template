@@ -879,6 +879,28 @@
       "pluginVersion": "10.0.0"
     },
     {
+      "type": "text",
+      "title": "Capturing Tables",
+      "description": "Tables configured for CDC replication (table.include.list from .env)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 2,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 22,
+      "targets": [],
+      "options": {
+        "content": "## SQL Server \u2192 Aurora (Forward Path)\n**Source Tables:** ${SQLSERVER_TABLE_INCLUDE_LIST}\n\n**Sink Regex:** ${JDBC_SINK_AURORA_TOPICS_REGEX}",
+        "mode": "markdown"
+      },
+      "pluginVersion": "9.2.0"
+    },
+    {
       "type": "row",
       "title": "Lag \u2014 End-to-End Replication (SLA)",
       "collapsed": false,
