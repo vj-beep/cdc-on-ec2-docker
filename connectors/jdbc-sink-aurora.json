@@ -35,7 +35,7 @@
     "consumer.override.fetch.min.bytes": "1",
     "consumer.override.metadata.max.age.ms": "30000",
 
-    "errors.tolerance": "none",
+    "errors.tolerance": "all",
     "errors.deadletterqueue.topic.name": "dlq-jdbc-sink-aurora",
     "errors.deadletterqueue.topic.replication.factor": "${KAFKA_REPLICATION_FACTOR}",
     "errors.deadletterqueue.context.headers.enable": "true",

@@ -38,6 +38,10 @@
     "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
 
     "producer.override.linger.ms": "0",
-    "producer.override.max.request.size": "${CONNECT_PRODUCER_MAX_REQUEST_SIZE}"
+    "producer.override.max.request.size": "${CONNECT_PRODUCER_MAX_REQUEST_SIZE}",
+
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true"
   }
 }

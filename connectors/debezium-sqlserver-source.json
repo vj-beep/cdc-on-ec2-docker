@@ -39,6 +39,10 @@
     "max.queue.size.in.bytes": "${SQLSERVER_SOURCE_MAX_QUEUE_SIZE_IN_BYTES}",
 
     "producer.override.linger.ms": "1",
-    "producer.override.max.request.size": "${CONNECT_PRODUCER_MAX_REQUEST_SIZE}"
+    "producer.override.max.request.size": "${CONNECT_PRODUCER_MAX_REQUEST_SIZE}",
+
+    "errors.tolerance": "all",
+    "errors.log.enable": "true",
+    "errors.log.include.messages": "true"
   }
 }
