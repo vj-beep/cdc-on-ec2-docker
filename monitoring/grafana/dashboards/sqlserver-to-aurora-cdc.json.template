@@ -689,17 +689,17 @@
       "id": 19,
       "targets": [
         {
-          "expr": "rate(debezium_metrics_total_number_of_create_events_seen{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
+          "expr": "rate(debezium_metrics_total_number_of_create_events_seen_total{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
           "legendFormat": "Inserts/s",
           "refId": "A"
         },
         {
-          "expr": "rate(debezium_metrics_total_number_of_update_events_seen{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
+          "expr": "rate(debezium_metrics_total_number_of_update_events_seen_total{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
           "legendFormat": "Updates/s",
           "refId": "B"
         },
         {
-          "expr": "rate(debezium_metrics_total_number_of_delete_events_seen{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
+          "expr": "rate(debezium_metrics_total_number_of_delete_events_seen_total{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[5m])",
           "legendFormat": "Deletes/s",
           "refId": "C"
         }
@@ -752,7 +752,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
+        "w": 8,
         "x": 0,
         "y": 19
       },
@@ -822,8 +822,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 12,
+        "w": 8,
+        "x": 8,
         "y": 19
       },
       "id": 13,
@@ -893,8 +893,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 18,
+        "w": 8,
+        "x": 16,
         "y": 19
       },
       "id": 14,
