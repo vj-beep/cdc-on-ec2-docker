@@ -653,4 +653,81 @@ ssh -i ~/.ssh/id_rsa ec2-user@<broker1-ip>
 
 ---
 
+## Troubleshooting Broken Deployments
+
+### Phase 2a: Repo Clone Fails Silently
+
+**Symptom:** Phase 2a reports "✅ deployment completed successfully" but the repo is missing on one or more nodes.
+
+**Root Cause:** SSM command status only indicates whether the script exited successfully — it does NOT verify that files were actually created. A failed `git clone` can be masked by subsequent commands that succeed.
+
+**Diagnosis:**
+```bash
+# Check if repo exists on the node via SSM:
+aws ssm send-command --instance-ids <instance-id> \
+  --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["test -f /home/ec2-user/cdc-on-ec2-docker/docker-compose.yml && echo EXISTS || echo MISSING"]'
+```
+
+**Resolution:**
+1. Manually retry Phase 2a — the validation now checks for `docker-compose.yml` in output and will report failure if the file is missing
+2. If the node has persistent network issues, check:
+   - Network connectivity from node to GitHub (can reach github.com on HTTPS)
+   - Proxy configuration if using `HTTP_PROXY`/`HTTPS_PROXY`
+   - EC2 security group egress rules (if restricted, must allow HTTPS to github.com or your repo host)
+
+### Phase 5: Brokers Fail to Start
+
+**Symptom:** Brokers report "health: starting" but never transition to "healthy", or one broker is missing entirely.
+
+**Root Cause:** Kafka KRaft quorum requires all 3 brokers to start. If even one broker fails to start or connect to the other brokers, the quorum is incomplete and services (Connect, Schema Registry) cannot connect to Kafka.
+
+**Diagnosis:**
+```bash
+# Check broker container status:
+docker ps | grep broker
+
+# Check broker logs for quorum errors:
+docker logs <broker-container-name> | grep -i "quorum\|leader\|controller"
+```
+
+**Resolution:**
+1. If one broker is still starting (health: starting), wait 2-3 minutes — KRaft leader election can take 30-60s
+2. If one broker has crashed or won't start:
+   - Check logs: `docker logs <broker-container>`
+   - Restart the broker: `./scripts/5-start-node.sh broker<N>`
+   - If it still won't start, the node may have a persistent issue — check `/data/kafka` mount and Docker daemon health
+
+### Phase 6: Connectors Deploy But Return HTTP 000 (Connection Refused)
+
+**Symptom:** Phase 6 reports `[ERROR] Failed to deploy connector (HTTP 000)` even though Connect REST API appears to be running.
+
+**Root Cause:** Connect workers failed to initialize because they couldn't create their internal topics on Kafka (occurs when no brokers are reachable). The REST API port appears open (netstat or `nc` says port 8083 is open), but the Connect service isn't actually listening because it exited during startup.
+
+**Diagnosis:**
+```bash
+# Check Connect container status:
+docker logs <connect-container-name> | tail -50 | grep -i "timeout\|error\|exception"
+
+# Common error: "Timeout expired while trying to create topic(s)"
+```
+
+**Resolution:**
+1. Verify all 3 Kafka brokers are running and healthy (previous section)
+2. Wait 2-3 minutes for KRaft quorum to stabilize
+3. Restart Connect workers: `./scripts/5-start-node.sh connect`
+4. Retry Phase 6: `./scripts/6-deploy-connectors.sh`
+
+### Phase 7: Validation Fails on "Kafka broker not reachable"
+
+**Symptom:** Phase 7 validation reports "Kafka Broker X (IP:9092) is not reachable" but brokers are running.
+
+**Root Cause:** Brokers are using `network_mode: host`, so they listen on the private IP of each EC2 instance, not on a Docker-bridged network. The jumpbox/control machine cannot reach these private IPs directly.
+
+**This is NOT an error** — Phase 7 cannot test Kafka connectivity from the jumpbox in SSM mode. All other validation checks (Connect REST, Schema Registry, databases) will pass.
+
+**Expected behavior:** The warning appears but deployment is successful. Internal connectivity (between nodes) is what matters for CDC.
+
+---
+
 *Apache, Apache Kafka, Kafka, and the Kafka logo are trademarks of The Apache Software Foundation.*
