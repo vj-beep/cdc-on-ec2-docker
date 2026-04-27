@@ -745,7 +745,8 @@
     },
     {
       "type": "timeseries",
-      "title": "E2E CDC Lag (seconds)",
+      "title": "E2E CDC Lag",
+      "description": "Left axis: Debezium source lag in seconds (goes stale when idle — no new events means the metric freezes). Right axis: Kafka consumer lag in records (always accurate — 0 means fully caught up).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -760,8 +761,13 @@
       "targets": [
         {
           "expr": "debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"} / 1000",
-          "legendFormat": "{{ connector }}",
+          "legendFormat": "Source Lag (s)",
           "refId": "A"
+        },
+        {
+          "expr": "sum(kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-aurora.*\",topic=~\"$topic\"})",
+          "legendFormat": "Consumer Lag (records)",
+          "refId": "B"
         }
       ],
       "fieldConfig": {
@@ -799,7 +805,35 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Consumer Lag (records)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 5
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "orange"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -1358,7 +1392,8 @@
     },
     {
       "type": "gauge",
-      "title": "Avg Lag (1h)",
+      "title": "Consumer Lag",
+      "description": "Total Kafka consumer lag in records across all partitions. 0 = sink fully caught up. More reliable than Debezium source lag which goes stale when idle.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1385,9 +1420,9 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "short",
           "min": 0,
-          "max": 5,
+          "max": 100000,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1397,25 +1432,26 @@
               },
               {
                 "color": "yellow",
-                "value": 1
+                "value": 1000
               },
               {
                 "color": "orange",
-                "value": 3
+                "value": 10000
               },
               {
                 "color": "red",
-                "value": 5
+                "value": 100000
               }
             ]
-          }
+          },
+          "noValue": "0"
         },
         "overrides": []
       },
       "targets": [
         {
-          "expr": "avg_over_time(debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[1h]) / 1000",
-          "legendFormat": "1h avg",
+          "expr": "sum(kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-aurora.*\",topic!~\".*_.*_.*_.*\"})",
+          "legendFormat": "records",
           "refId": "A",
           "instant": true
         }
@@ -1423,7 +1459,8 @@
     },
     {
       "type": "gauge",
-      "title": "Avg Lag (15m)",
+      "title": "Source Lag",
+      "description": "Debezium milliseconds_behind_source. Caution: this metric freezes when no new events arrive (idle source). Check Consumer Lag gauge for ground truth.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1437,8 +1474,8 @@
       "id": 92,
       "targets": [
         {
-          "expr": "avg_over_time(debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"}[15m]) / 1000",
-          "legendFormat": "15m avg",
+          "expr": "debezium_metrics_milliseconds_behind_source{context=\"streaming\",plugin=\"sqlserver\",connector=~\"$connector\"} / 1000",
+          "legendFormat": "seconds",
           "refId": "A",
           "instant": true
         }
@@ -1447,7 +1484,7 @@
         "defaults": {
           "unit": "s",
           "min": 0,
-          "max": 5,
+          "max": 60,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1461,11 +1498,11 @@
               },
               {
                 "color": "orange",
-                "value": 3
+                "value": 10
               },
               {
                 "color": "red",
-                "value": 5
+                "value": 60
               }
             ]
           }
