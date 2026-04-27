@@ -65,7 +65,7 @@ if [[ "$LOCAL_MODE" -eq 0 && "${CDC_ON_NODE:-}" != "1" ]]; then
         ssh -i "$SSH_KEY" \
             -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
             "${DEPLOY_USER}@${MONITOR_IP}" \
-            "cd ${DEPLOY_DIR} && CDC_ON_NODE=1 bash scripts/ops-refresh-grafana.sh" 2>&1
+            "cd ${DEPLOY_DIR} && export http_proxy='${HTTP_PROXY:-}' https_proxy='${HTTPS_PROXY:-}' && git pull && CDC_ON_NODE=1 bash scripts/ops-refresh-grafana.sh" 2>&1
 
         if [[ $? -eq 0 ]]; then
             info "Grafana refreshed successfully"
@@ -81,7 +81,7 @@ if [[ "$LOCAL_MODE" -eq 0 && "${CDC_ON_NODE:-}" != "1" ]]; then
 
         info "Refreshing Grafana on monitor ($INSTANCE_ID) via SSM..."
 
-        REMOTE_CMD="cd ${DEPLOY_DIR} && CDC_ON_NODE=1 bash scripts/ops-refresh-grafana.sh"
+        REMOTE_CMD="cd ${DEPLOY_DIR} && export http_proxy='${HTTP_PROXY:-}' https_proxy='${HTTPS_PROXY:-}' && git pull && CDC_ON_NODE=1 bash scripts/ops-refresh-grafana.sh"
 
         PARAMS=$(jq -n --arg cmd "$REMOTE_CMD" '{"commands":[$cmd],"executionTimeout":["180"]}')
 
