@@ -1113,6 +1113,51 @@
     },
     {
       "type": "timeseries",
+      "title": "Hot Partitions (by msg rate)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 37
+      },
+      "id": 209,
+      "targets": [
+        {
+          "expr": "topk(10, sum by (topic, partition) (rate(kafka_server_brokertopicmetrics_messagesinpersec{topic!~\"__.*|_confluent.*|_schemas|dlq-.*\"}[5m])))",
+          "legendFormat": "{{ topic }} p{{ partition }}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
       "title": "Under-Replicated Partitions",
       "datasource": {
         "type": "prometheus",
