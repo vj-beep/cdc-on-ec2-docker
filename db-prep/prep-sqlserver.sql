@@ -99,11 +99,27 @@ GO
 :setvar CDC_CAPTURE_MAXSCANS  "100"
 :setvar CDC_CAPTURE_POLLING   "0"
 
+-- Create CDC jobs if they don't exist (EC2: jobs must be added before they can be changed)
+IF NOT EXISTS (SELECT 1 FROM msdb.dbo.cdc_jobs WHERE database_id = DB_ID() AND job_type = 'capture')
+BEGIN
+    EXEC sys.sp_cdc_add_job @job_type = 'capture';
+    PRINT 'Created CDC capture job';
+END
+IF NOT EXISTS (SELECT 1 FROM msdb.dbo.cdc_jobs WHERE database_id = DB_ID() AND job_type = 'cleanup')
+BEGIN
+    EXEC sys.sp_cdc_add_job @job_type = 'cleanup';
+    PRINT 'Created CDC cleanup job';
+END
+GO
+
+USE [$(DB_NAME)];
+GO
+
 EXEC sys.sp_cdc_change_job
     @job_type = 'capture',
     @pollinginterval = $(CDC_CAPTURE_POLLING),   -- 0 = continuous
-    @maxtrans        = $(CDC_CAPTURE_MAXTRANS),  -- lower = lower latency, higher = higher throughput
-    @maxscans        = $(CDC_CAPTURE_MAXSCANS);  -- scan cycles per run
+    @maxtrans        = $(CDC_CAPTURE_MAXTRANS),
+    @maxscans        = $(CDC_CAPTURE_MAXSCANS);
 
 PRINT 'CDC capture: maxtrans=$(CDC_CAPTURE_MAXTRANS), maxscans=$(CDC_CAPTURE_MAXSCANS), polling=$(CDC_CAPTURE_POLLING)';
 GO
