@@ -369,7 +369,11 @@ else
     ERRORS=$((ERRORS + 1))
 fi
 if [[ -n "${BROKER_1_IP:-}" ]]; then
-    check_port "$BROKER_1_IP" 9092 "Broker-1 Kafka (9092)"
+    if timeout 3 bash -c "echo >/dev/tcp/${BROKER_1_IP}/9092" 2>/dev/null; then
+        pass "Broker-1 Kafka (${BROKER_1_IP}:9092) — reachable"
+    else
+        warn "Broker-1 Kafka (${BROKER_1_IP}:9092) — not reachable (expected if brokers not started yet)"
+    fi
 fi
 
 # ============================================================
