@@ -19,6 +19,7 @@
     "schema.history.internal.kafka.topic.replication.factor": "${KAFKA_REPLICATION_FACTOR}",
     "schema.history.internal.store.only.captured.tables.ddl": "true",
     "schema.history.internal.store.only.captured.databases.ddl": "true",
+    "schema.history.internal.skip.unparseable.ddl": "true",
 
     "topic.creation.default.replication.factor": "${KAFKA_REPLICATION_FACTOR}",
     "topic.creation.default.partitions": "${KAFKA_DEFAULT_PARTITIONS}",
