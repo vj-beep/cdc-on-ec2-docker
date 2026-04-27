@@ -763,7 +763,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-sqlserver.*\",topic=~\"$topic\"})",
+          "expr": "sum(kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-sqlserver.*\",topic=~\".*\\\\..*\"})",
           "legendFormat": "Consumer Lag (records)",
           "refId": "B"
         }
@@ -1404,7 +1404,7 @@
       "id": 91,
       "targets": [
         {
-          "expr": "sum(kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-sqlserver.*\",topic!~\".*_.*_.*_.*\"})",
+          "expr": "sum(kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-sqlserver.*\",topic=~\".*\\\\..*\"})",
           "legendFormat": "records",
           "refId": "A",
           "instant": true
