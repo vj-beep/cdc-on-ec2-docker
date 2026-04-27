@@ -728,6 +728,32 @@ docker logs <connect-container-name> | tail -50 | grep -i "timeout\|error\|excep
 
 **Expected behavior:** The warning appears but deployment is successful. Internal connectivity (between nodes) is what matters for CDC.
 
+### Post-Deployment: Node 5 High CPU Usage
+
+**Symptom:** Node 5 (monitor node) shows near 100% CPU utilization despite all services running.
+
+**Root Cause:** Control Center's internal CMF (Cluster Metadata Framework) service becomes unresponsive (port 8080), causing stream threads to get stuck in retry loops with excessive polling and retries.
+
+**Evidence:** Check Control Center logs for repeated `Connection refused: localhost/127.0.0.1:8080` errors.
+
+**Resolution:**
+```bash
+# SSH or SSM into Node 5 and restart Control Center
+cd /home/ec2-user/cdc-on-ec2-docker
+docker compose -f docker-compose.yml -f docker-compose.ksqldb-monitoring.yml restart control-center
+
+# Verify CPU returns to normal (should drop from ~100% to 3-5%)
+top -bn1 | grep Cpu
+docker stats --no-stream --format "{{.Container}}\t{{.CPUPerc}}"
+```
+
+**Why it happens:** Control Center is a Kafka Streams application that maintains internal topics and metadata. Under high initial load or transient network issues, the internal CMF service can become unresponsive.
+
+**Prevention:**
+- Resource limits are now set in `docker-compose.yml` (4 CPU cores max, 8 GB memory max)
+- Monitor Control Center health: `curl -s http://localhost:9021/health`
+- Node 5 must have 8+ vCPU, 32+ GB RAM per requirements
+
 ---
 
 *Apache, Apache Kafka, Kafka, and the Kafka logo are trademarks of The Apache Software Foundation.*

@@ -259,6 +259,14 @@ services:
     image: confluentinc/cp-enterprise-control-center-next-gen:${CONTROL_CENTER_VERSION}
     network_mode: host
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
     environment:
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
