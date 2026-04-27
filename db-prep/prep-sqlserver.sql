@@ -1,9 +1,9 @@
 -------------------------------------------------------------------------------
 -- prep-sqlserver.sql
 --
--- Prepares SQL Server (RDS) for Change Data Capture:
+-- Prepares SQL Server (EC2 self-managed) for Change Data Capture:
 --   1. Creates the target database
---   2. Enables CDC at the database level
+--   2. Enables CDC at the database level (uses sys.sp_cdc_enable_db)
 --   3. Creates a dedicated CDC reader user
 --   4. Configures CDC agent polling interval
 --
@@ -11,9 +11,10 @@
 --   a) Create your application tables (see examples below)
 --   b) Enable CDC on each table individually (see examples below)
 --
+-- Prerequisites: SQL Server Agent must be running (CDC requires it).
+--   Start-Service SQLSERVERAGENT    (PowerShell on the EC2 instance)
+--
 -- Run with: sqlcmd -S <host>,1433 -U cdcadmin -P <password> -i prep-sqlserver.sql -C
--- Note: Uses RDS-specific procedures (msdb.dbo.rds_cdc_*) instead of sys.sp_cdc_*
---       because RDS master user does not have sysadmin privileges.
 --
 -- For custom database names, use sqlcmd variable substitution:
 --   sqlcmd -v DB_NAME="mydb" -S <host>,1433 -U cdcadmin -P <password> -i prep-sqlserver.sql -C
@@ -22,6 +23,8 @@
 
 -- Database name (default: pocdb, override with -v DB_NAME="yourdb")
 :setvar DB_NAME pocdb
+-- CDC reader password (default placeholder — override with -v CDC_PWD="yourpassword")
+:setvar CDC_PWD "Cdc_R3ader_P0C!"
 
 USE [master];
 GO
@@ -43,8 +46,8 @@ GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.databases WHERE name = '$(DB_NAME)' AND is_cdc_enabled = 1)
 BEGIN
-    EXEC msdb.dbo.rds_cdc_enable_db '$(DB_NAME)';
-    PRINT 'CDC enabled on database [$(DB_NAME)] (via RDS procedure)';
+    EXEC sys.sp_cdc_enable_db;
+    PRINT 'CDC enabled on database [$(DB_NAME)]';
 END
 GO
 
@@ -79,7 +82,7 @@ GO
 
 -- Grant permissions required by Debezium
 EXEC sp_addrolemember 'db_datareader', 'cdc_reader';
-EXEC sp_addrolemember 'db_owner', 'cdc_reader';  -- Required for CDC access on RDS
+EXEC sp_addrolemember 'db_owner', 'cdc_reader';  -- Required for CDC table access
 
 PRINT 'Granted CDC permissions to cdc_reader';
 GO
