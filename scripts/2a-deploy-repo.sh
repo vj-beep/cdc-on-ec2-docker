@@ -189,8 +189,23 @@ REMOTE_EOF
         done
 
         if [[ "$status" == "Success" ]]; then
-            echo "   ✅ $node_name deployment completed successfully"
-            return 0
+            # Verify critical file was actually created (don't trust SSM status alone)
+            local verify_output
+            verify_output=$(aws ssm get-command-invocation \
+                --region "$AWS_REGION" \
+                --command-id "$cmd_id" \
+                --instance-id "$node_addr" \
+                --query 'StandardOutputContent' \
+                --output text 2>/dev/null)
+
+            if echo "$verify_output" | grep -q "docker-compose.yml"; then
+                echo "   ✅ $node_name deployment completed successfully"
+                return 0
+            else
+                echo "   ❌ $node_name deployment FAILED (docker-compose.yml not found)"
+                echo "   Output: $(echo "$verify_output" | tail -3 | tr '\n' ' ')"
+                return 1
+            fi
         elif [[ "$status" == "Failed" ]]; then
             echo "   ❌ $node_name deployment FAILED"
             local error_output
