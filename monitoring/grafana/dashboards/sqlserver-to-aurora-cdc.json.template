@@ -1116,7 +1116,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Hot Partitions (by msg rate)",
+      "title": "Hot Topics (msg/s)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1130,8 +1130,8 @@
       "id": 209,
       "targets": [
         {
-          "expr": "topk(10, sum by (topic, partition) (rate(kafka_server_brokertopicmetrics_messagesinpersec{topic!~\"__.*|_confluent.*|_schemas|dlq-.*\"}[5m])))",
-          "legendFormat": "{{ topic }} p{{ partition }}",
+          "expr": "topk(10, sum by (topic) (kafka_server_brokertopicmetrics_messagesinpersec{topic!~\"__.*|_confluent.*|_schemas|dlq-.*|connect-.*\"}))",
+          "legendFormat": "{{ topic }}",
           "refId": "A"
         }
       ],
