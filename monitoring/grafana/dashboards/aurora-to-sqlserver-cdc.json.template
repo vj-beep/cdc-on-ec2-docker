@@ -1388,9 +1388,9 @@
       }
     },
     {
-      "type": "gauge",
+      "type": "stat",
       "title": "Consumer Lag",
-      "description": "Total Kafka consumer lag in records across all partitions. 0 = sink fully caught up. More reliable than Debezium source lag which goes stale when idle.",
+      "description": "Total Kafka consumer lag in records across all sink partitions. 0 = fully caught up. This is the ground truth for delivery lag — unlike Source Lag, it never goes stale.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1402,24 +1402,16 @@
         "y": 5
       },
       "id": 91,
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "orientation": "auto",
-        "showThresholdLabels": true,
-        "showThresholdMarkers": true,
-        "text": {}
-      },
+      "targets": [
+        {
+          "expr": "sum(kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-sqlserver.*\",topic!~\".*_.*_.*_.*\"})",
+          "legendFormat": "records",
+          "refId": "A",
+          "instant": true
+        }
+      ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "min": 0,
-          "max": 100000,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1445,19 +1437,24 @@
         },
         "overrides": []
       },
-      "targets": [
-        {
-          "expr": "sum(kafka_consumer_consumer_fetch_manager_metrics_records_lag{client_id=~\"connector-consumer-jdbc-sink-sqlserver.*\",topic!~\".*_.*_.*_.*\"})",
-          "legendFormat": "records",
-          "refId": "A",
-          "instant": true
-        }
-      ]
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
+      }
     },
     {
-      "type": "gauge",
+      "type": "stat",
       "title": "Source Lag",
-      "description": "Debezium milliseconds_behind_source. Caution: this metric freezes when no new events arrive (idle source). Check Consumer Lag gauge for ground truth.",
+      "description": "Debezium milliseconds_behind_source converted to seconds. WARNING: this metric freezes when the source DB is idle (no new CDC events). If it shows hours but Consumer Lag is 0, ignore it.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1480,8 +1477,6 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "min": 0,
-          "max": 60,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -1508,16 +1503,16 @@
       },
       "options": {
         "reduceOptions": {
+          "values": false,
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "",
-          "values": false
+          "fields": ""
         },
-        "orientation": "auto",
-        "showThresholdLabels": true,
-        "showThresholdMarkers": true,
-        "text": {}
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center"
       }
     }
   ]
