@@ -1127,7 +1127,7 @@
       "id": 209,
       "targets": [
         {
-          "expr": "topk(10, sum by (topic) (kafka_server_brokertopicmetrics_messagesinpersec{topic!~\"__.*|_confluent.*|_schemas|dlq-.*|connect-.*\"}))",
+          "expr": "topk(10, sum by (topic) (kafka_server_brokertopicmetrics_messagesinpersec_rate{topic!~\"__.*|_confluent.*|_schemas|dlq-.*|connect-.*\",topic!=\"\"}))",
           "legendFormat": "{{ topic }}",
           "refId": "A"
         }
