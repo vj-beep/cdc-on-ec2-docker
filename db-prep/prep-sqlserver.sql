@@ -99,17 +99,23 @@ GO
 :setvar CDC_CAPTURE_MAXSCANS  "100"
 :setvar CDC_CAPTURE_POLLING   "0"
 
--- Create CDC jobs if they don't exist (EC2: jobs must be added before they can be changed)
-IF NOT EXISTS (SELECT 1 FROM msdb.dbo.cdc_jobs WHERE database_id = DB_ID() AND job_type = 'capture')
-BEGIN
+-- Create CDC jobs (EC2: jobs must exist before sp_cdc_change_job can tune them)
+BEGIN TRY
     EXEC sys.sp_cdc_add_job @job_type = 'capture';
     PRINT 'Created CDC capture job';
-END
-IF NOT EXISTS (SELECT 1 FROM msdb.dbo.cdc_jobs WHERE database_id = DB_ID() AND job_type = 'cleanup')
-BEGIN
+END TRY
+BEGIN CATCH
+    PRINT 'CDC capture job already exists — skipping';
+END CATCH
+GO
+
+BEGIN TRY
     EXEC sys.sp_cdc_add_job @job_type = 'cleanup';
     PRINT 'Created CDC cleanup job';
-END
+END TRY
+BEGIN CATCH
+    PRINT 'CDC cleanup job already exists — skipping';
+END CATCH
 GO
 
 USE [$(DB_NAME)];
