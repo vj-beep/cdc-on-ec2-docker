@@ -369,7 +369,7 @@ else
     ERRORS=$((ERRORS + 1))
 fi
 if [[ -n "${BROKER_1_IP:-}" ]]; then
-    check_port "$BROKER_1_IP" 22 "Broker-1 SSH"
+    check_port "$BROKER_1_IP" 9092 "Broker-1 Kafka (9092)"
 fi
 
 # ============================================================
