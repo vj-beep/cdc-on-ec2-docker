@@ -13,7 +13,7 @@
 
     "insert.mode": "upsert",
     "primary.key.mode": "record_key",
-    "schema.evolution": "basic",
+    "schema.evolution": "none",
     "delete.enabled": "false",
 
     "key.converter": "io.confluent.connect.avro.AvroConverter",
