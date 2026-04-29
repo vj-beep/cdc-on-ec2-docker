@@ -96,9 +96,20 @@ cp .env.template .env
 |---------|-----------|---------------|
 | EC2 Node IPs | `BROKER_1_IP`, `BROKER_2_IP`, `BROKER_3_IP`, `CONNECT_1_IP`, `MONITOR_1_IP` | `terraform output` or AWS Console → EC2 → Private IPv4 |
 | EC2 Instance IDs | `BROKER_1_INSTANCE_ID` through `MONITOR_1_INSTANCE_ID` | `terraform output instance_ids` or AWS Console → EC2 |
-| Aurora PostgreSQL | `AURORA_HOST`, `AURORA_PASSWORD` | `terraform output aurora_password` or AWS Console → RDS → Cluster endpoint |
-| SQL Server | `SQLSERVER_HOST`, `SQLSERVER_PASSWORD` | `terraform output sqlserver_password` or AWS Console → RDS → Instance endpoint |
+| Aurora PostgreSQL | `AURORA_HOST`, `AURORA_PASSWORD` | `terraform output aurora_password` or AWS Secrets Manager |
+| SQL Server | `SQLSERVER_HOST`, `SQLSERVER_PASSWORD` | `terraform output sqlserver_password` or AWS Secrets Manager |
 | KRaft Cluster ID | `CLUSTER_ID` | Generate once: `python3 -c "import uuid,base64; print(base64.urlsafe_b64encode(uuid.uuid4().bytes).decode().rstrip('='))"` |
+
+**Note on Database Passwords:**  
+Passwords are managed in AWS Secrets Manager under `${PROJECT_NAME}/{sqlserver,aurora}/password`. To fetch them:
+
+```bash
+# SQL Server
+aws secretsmanager get-secret-value --secret-id cdc-poc-experian/sqlserver/password --query SecretString --output text
+
+# Aurora
+aws secretsmanager get-secret-value --secret-id cdc-poc-experian/aurora/password --query SecretString --output text
+```
 | Public Repo | `PUBLIC_REPO_URL` | Your GitHub URL for this repository |
 
 ### Step 3: Configure CDC tables
