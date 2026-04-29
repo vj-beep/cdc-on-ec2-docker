@@ -18,6 +18,7 @@ services:
     build:
       context: .
       dockerfile: connect/Dockerfile
+      network: host
       args:
         CP_VERSION: ${CP_VERSION:-8.0.0}
         DEBEZIUM_VERSION: ${DEBEZIUM_VERSION:-3.2.6.Final}
