@@ -14,7 +14,7 @@
     "insert.mode": "upsert",
     "primary.key.mode": "record_key",
     "schema.evolution": "basic",
-    "delete.enabled": "false",
+    "delete.enabled": "true",
 
     "key.converter": "io.confluent.connect.avro.AvroConverter",
     "key.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
@@ -24,8 +24,8 @@
     "transforms": "unwrap,routeTopics",
 
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
-    "transforms.unwrap.drop.tombstones": "true",
-    "transforms.unwrap.delete.handling.mode": "drop",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
 
     "transforms.routeTopics.type": "org.apache.kafka.connect.transforms.RegexRouter",
     "transforms.routeTopics.regex": "${JDBC_SINK_AURORA_TOPIC_REGEX}",
