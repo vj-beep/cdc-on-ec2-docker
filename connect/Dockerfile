@@ -9,7 +9,16 @@ ARG DEBEZIUM_VERSION=3.2.6.Final
 # curl uses HTTP_PROXY/HTTPS_PROXY automatically (passed as Docker build args).
 ARG PROXY_HOST
 ARG PROXY_PORT=8080
-ENV JAVA_TOOL_OPTIONS=${PROXY_HOST:+"-Dhttp.proxyHost=${PROXY_HOST} -Dhttp.proxyPort=${PROXY_PORT} -Dhttps.proxyHost=${PROXY_HOST} -Dhttps.proxyPort=${PROXY_PORT}"}
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=${NO_PROXY} \
+    http_proxy=${HTTP_PROXY} \
+    https_proxy=${HTTPS_PROXY} \
+    no_proxy=${NO_PROXY} \
+    JAVA_TOOL_OPTIONS=${PROXY_HOST:+"-Dhttp.proxyHost=${PROXY_HOST} -Dhttp.proxyPort=${PROXY_PORT} -Dhttps.proxyHost=${PROXY_HOST} -Dhttps.proxyPort=${PROXY_PORT}"}
 
 # All three Debezium connectors installed from Maven Central.
 # Confluent Hub lags behind Maven releases — 3.2.6 available on Maven but not Hub.
@@ -29,7 +38,13 @@ RUN curl -fsSL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-jd
     rm -f /tmp/debezium-jdbc.tar.gz
 
 # Clear proxy so it does not leak into Connect workers at runtime
-ENV JAVA_TOOL_OPTIONS=
+ENV JAVA_TOOL_OPTIONS= \
+    HTTP_PROXY= \
+    HTTPS_PROXY= \
+    NO_PROXY= \
+    http_proxy= \
+    https_proxy= \
+    no_proxy=
 
 # Copy the Microsoft SQL Server JDBC driver (not bundled with Confluent or Debezium).
 # Download mssql-jdbc-12.4.2.jre11.jar from Microsoft and place it in connect/jars/ before building.
