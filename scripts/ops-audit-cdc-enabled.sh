@@ -13,8 +13,8 @@
 #
 # SQL Server (--sqlserver):
 #   • Database-level CDC status (is_cdc_enabled)
-#   • CDC-enabled tables: schema, table, capture instance, net changes
-#     support, and the date CDC was enabled
+#   • CDC-enabled tables: schema, table, PK status, capture instance,
+#     net changes support, and the date CDC was enabled
 #   • Tables WITHOUT CDC in the same schema (with PK info)
 #   • CDC capture/cleanup job configuration (polling interval, maxtrans,
 #     maxscans, retention)
@@ -178,7 +178,7 @@ General:
 
 SQL Server output:
   • Database-level CDC status
-  • CDC-enabled tables (capture instance, net changes, enable date)
+  • CDC-enabled tables (PK status, capture instance, net changes, enable date)
   • Tables without CDC in the same schema (with PK info)
   • CDC capture/cleanup job configuration
 
@@ -310,6 +310,7 @@ SET NOCOUNT ON;
 SELECT
     s.name,
     t.name,
+    CASE WHEN pk.object_id IS NOT NULL THEN 'Yes' ELSE 'No' END,
     ct.capture_instance,
     CASE ct.supports_net_changes WHEN 1 THEN 'Yes' ELSE 'No' END,
     CONVERT(VARCHAR(19), ct.create_date, 120),
@@ -317,6 +318,10 @@ SELECT
 FROM cdc.change_tables ct
 JOIN sys.tables t ON ct.source_object_id = t.object_id
 JOIN sys.schemas s ON t.schema_id = s.schema_id
+LEFT JOIN (
+    SELECT DISTINCT parent_object_id AS object_id
+    FROM sys.key_constraints WHERE type = 'PK'
+) pk ON pk.object_id = t.object_id
 WHERE s.name = '$(SCHEMA_FILTER)'
 ORDER BY s.name, t.name;
 SQLEOF
@@ -333,12 +338,13 @@ SQLEOF
   fi
 
   local count=0
-  printf "  ${GREY}%-15s %-30s %-35s %-10s %-20s %12s${NC}\n" "SCHEMA" "TABLE" "CAPTURE_INSTANCE" "NET_CHG" "CDC_ENABLED_AT" "ROW_COUNT"
-  printf "  ${GREY}%-15s %-30s %-35s %-10s %-20s %12s${NC}\n" "───────────────" "──────────────────────────────" "───────────────────────────────────" "──────────" "────────────────────" "────────────"
+  printf "  ${GREY}%-15s %-30s %-10s %-35s %-10s %-20s %12s${NC}\n" "SCHEMA" "TABLE" "HAS_PK" "CAPTURE_INSTANCE" "NET_CHG" "CDC_ENABLED_AT" "ROW_COUNT"
+  printf "  ${GREY}%-15s %-30s %-10s %-35s %-10s %-20s %12s${NC}\n" "───────────────" "──────────────────────────────" "──────────" "───────────────────────────────────" "──────────" "────────────────────" "────────────"
 
-  while IFS='|' read -r col_schema col_table col_instance col_net col_date col_rows; do
+  while IFS='|' read -r col_schema col_table col_pk col_instance col_net col_date col_rows; do
     col_schema=$(echo "$col_schema" | xargs)
     col_table=$(echo "$col_table" | xargs)
+    col_pk=$(echo "$col_pk" | xargs)
     col_instance=$(echo "$col_instance" | xargs)
     col_net=$(echo "$col_net" | xargs)
     col_date=$(echo "$col_date" | xargs)
@@ -346,7 +352,7 @@ SQLEOF
 
     [[ -z "$col_schema" || "$col_schema" == "---"* ]] && continue
 
-    printf "  ${GREEN}●${NC} %-14s %-30s %-35s %-10s %-20s %12s\n" "$col_schema" "$col_table" "$col_instance" "$col_net" "$col_date" "$col_rows"
+    printf "  ${GREEN}●${NC} %-14s %-30s %-10s %-35s %-10s %-20s %12s\n" "$col_schema" "$col_table" "$col_pk" "$col_instance" "$col_net" "$col_date" "$col_rows"
     ((count++))
   done <<< "$result"
 
