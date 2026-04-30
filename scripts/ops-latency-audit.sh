@@ -531,6 +531,167 @@ for c in d:
     done
     echo ""
 
+    # ── Section 11: Connect Node Health (only on the connect node) ───────────
+    # Node 4 runs connect-1 (port 8083, forward path), connect-2 (port 8084,
+    # reverse path), and schema-registry. On broker/monitor nodes these
+    # containers don't exist, so the checks are skipped silently.
+    #
+    # Connector state machine:
+    #   RUNNING  = healthy
+    #   PAUSED   = manually paused (deliberate or forgotten)
+    #   FAILED   = crashed — check error_trace in status output
+    #   UNASSIGNED = just started or lost worker assignment
+    #
+    # Task lag is the primary CDC latency signal: sink connector consumer
+    # groups falling behind means records are queuing in Kafka and not
+    # reaching the target DB. Source connector lag means the CDC log poller
+    # is behind the database transaction rate.
+    if docker inspect connect-1 &>/dev/null || docker inspect connect-2 &>/dev/null; then
+      echo "=== CONNECT NODE HEALTH ==="
+
+      # ── Connector status (both workers) ──────────────────────────────────
+      echo "--- Connector status (forward worker :8083) ---"
+      # List all connectors then get status for each; flag anything not RUNNING.
+      fwd_connectors=$(curl -sf http://localhost:8083/connectors 2>/dev/null || echo "[]")
+      echo "Connectors registered: $fwd_connectors"
+      for conn in $(echo "$fwd_connectors" | python3 -c "import sys,json; [print(c) for c in json.load(sys.stdin)]" 2>/dev/null); do
+        status_json=$(curl -sf "http://localhost:8083/connectors/${conn}/status" 2>/dev/null || echo "{}")
+        conn_state=$(echo "$status_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('connector',{}).get('state','UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
+        task_states=$(echo "$status_json" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+tasks = d.get('tasks', [])
+for t in tasks:
+    print(f\"  task[{t['id']}]: {t['state']}\" + (f\" — {t.get('trace','').splitlines()[0]}\" if t['state'] != 'RUNNING' else ''))
+" 2>/dev/null || echo "  (no tasks)")
+        echo "  $conn: connector=$conn_state"
+        echo "$task_states"
+      done
+      echo ""
+
+      echo "--- Connector status (reverse worker :8084) ---"
+      rev_connectors=$(curl -sf http://localhost:8084/connectors 2>/dev/null || echo "[]")
+      echo "Connectors registered: $rev_connectors"
+      for conn in $(echo "$rev_connectors" | python3 -c "import sys,json; [print(c) for c in json.load(sys.stdin)]" 2>/dev/null); do
+        status_json=$(curl -sf "http://localhost:8084/connectors/${conn}/status" 2>/dev/null || echo "{}")
+        conn_state=$(echo "$status_json" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('connector',{}).get('state','UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
+        task_states=$(echo "$status_json" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+tasks = d.get('tasks', [])
+for t in tasks:
+    print(f\"  task[{t['id']}]: {t['state']}\" + (f\" — {t.get('trace','').splitlines()[0]}\" if t['state'] != 'RUNNING' else ''))
+" 2>/dev/null || echo "  (no tasks)")
+        echo "  $conn: connector=$conn_state"
+        echo "$task_states"
+      done
+      echo ""
+
+      # ── Consumer group lag (sink connectors) ─────────────────────────────
+      # Sink connector group IDs follow the pattern: connect-<connector-name>.
+      # Lag > 0 means records are queuing in Kafka and not being written to
+      # the target DB — this is the direct measure of CDC end-to-end latency.
+      # We use kafka-consumer-groups from inside connect-1 (it has the
+      # Kafka CLI tools and can reach the bootstrap server on the same VPC).
+      #
+      # Bootstrap server: prefer KAFKA_BOOTSTRAP_SERVERS from .env, fall back
+      # to broker1 private IP if available, then localhost:9092 as last resort.
+      BOOTSTRAP_FOR_LAG="${BOOTSTRAP_SERVER:-${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}}"
+      echo "--- Consumer group lag (sink connectors, bootstrap=$BOOTSTRAP_FOR_LAG) ---"
+      for group in connect-jdbc-sink-aurora connect-jdbc-sink-sqlserver; do
+        echo "Group: $group"
+        docker exec connect-1 kafka-consumer-groups \
+          --bootstrap-server "$BOOTSTRAP_FOR_LAG" \
+          --describe --group "$group" 2>/dev/null | \
+          grep -v '^$' || echo "  (group not found or connect-1 not running)"
+        echo ""
+      done
+
+      # ── DLQ message count ─────────────────────────────────────────────────
+      # Any messages in the DLQ means records failed to sink and were routed
+      # to the dead-letter queue. Even 1 message is a signal to investigate —
+      # the DLQ record includes 10 __connect.errors.* headers with root cause.
+      # We check offset end vs beginning; non-zero = messages present.
+      echo "--- DLQ check (dead letter queue topics) ---"
+      for dlq_topic in dlq-jdbc-sink-aurora dlq-jdbc-sink-sqlserver; do
+        # kafka-get-offsets gives current end offset; beginning offset 0 means
+        # we can just check if end offset > 0 (cleanup.policy=compact, so
+        # beginning stays at 0 unless explicitly trimmed).
+        end_offset=$(docker exec connect-1 kafka-get-offsets \
+          --bootstrap-server "$BOOTSTRAP_FOR_LAG" \
+          --topic "$dlq_topic" 2>/dev/null | \
+          awk -F: '{sum += $NF} END {print sum+0}' || echo "0")
+        if [[ "$end_offset" -gt 0 ]] 2>/dev/null; then
+          echo "  $dlq_topic: $end_offset message(s) — NEEDS INVESTIGATION"
+          # Show the most recent error from the last DLQ record header
+          docker exec connect-1 kafka-console-consumer \
+            --bootstrap-server "$BOOTSTRAP_FOR_LAG" \
+            --topic "$dlq_topic" \
+            --from-beginning --max-messages 1 \
+            --property print.headers=true \
+            --timeout-ms 5000 2>/dev/null | \
+            grep '__connect.errors.exception.message' | head -3 || true
+        else
+          echo "  $dlq_topic: empty (no failed records)"
+        fi
+      done
+      echo ""
+
+      # ── Connect worker JVM ────────────────────────────────────────────────
+      echo "--- Connect worker JVM (connect-1 and connect-2) ---"
+      for worker in connect-1 connect-2; do
+        if docker inspect "$worker" &>/dev/null; then
+          heap=$(docker inspect "$worker" 2>/dev/null | \
+            python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for c in d:
+    for e in c.get('Config', {}).get('Env', []):
+        if 'HEAP' in e or 'JVM' in e:
+            print(e)
+" 2>/dev/null || echo "(not found)")
+          echo "  $worker: $heap"
+          # Check if the worker process is actually running (container up ≠ JVM healthy)
+          worker_pid=$(docker exec "$worker" pgrep -f ConnectDistributed 2>/dev/null | head -1 || echo "")
+          if [[ -n "$worker_pid" ]]; then
+            echo "  $worker: ConnectDistributed PID=$worker_pid (running)"
+          else
+            echo "  $worker: ConnectDistributed process NOT FOUND (worker may be starting or crashed)"
+          fi
+        else
+          echo "  $worker: container not present on this node"
+        fi
+      done
+      echo ""
+
+      # ── Schema Registry health ────────────────────────────────────────────
+      # Schema Registry must be healthy for Debezium source connectors to
+      # register Avro schemas. If SR is down, connectors stall waiting for
+      # schema registration. /subjects returns a list of registered subjects.
+      echo "--- Schema Registry health (port 8081) ---"
+      sr_mode=$(curl -sf http://localhost:8081/mode 2>/dev/null || echo "(unreachable)")
+      echo "  Mode: $sr_mode"
+      sr_subjects=$(curl -sf http://localhost:8081/subjects 2>/dev/null | \
+        python3 -c "import sys,json; s=json.load(sys.stdin); print(f'{len(s)} subjects registered')" \
+        2>/dev/null || echo "(could not list subjects)")
+      echo "  $sr_subjects"
+      echo ""
+
+      # ── Connect worker heap from process (same as broker section) ─────────
+      echo "--- Connect worker open FD count ---"
+      for worker in connect-1 connect-2; do
+        w_pid=$(docker exec "$worker" pgrep -f ConnectDistributed 2>/dev/null | head -1 || echo "")
+        if [[ -n "$w_pid" ]]; then
+          # Count FDs inside the container namespace
+          fd_count=$(docker exec "$worker" bash -c "ls /proc/${w_pid}/fd 2>/dev/null | wc -l" 2>/dev/null || echo "?")
+          fd_limit=$(docker exec "$worker" bash -c "awk '/open files/{print \$4}' /proc/${w_pid}/limits 2>/dev/null" 2>/dev/null || echo "?")
+          echo "  $worker PID $w_pid: FDs=$fd_count / limit=$fd_limit"
+        fi
+      done
+      echo ""
+
+    fi  # end connect node health block
+
     # ── fio disk probe (only when --probes is passed through) ────────────────
     # fio settings explained:
     #   ioengine=libaio  — async I/O matching how Kafka flushes log segments
@@ -861,6 +1022,7 @@ SECTIONS=(
   "KAFKA BROKER CONFIGURATION"
   "REPLICATION AND PARTITION HEALTH"
   "NETWORK LATENCY"
+  "CONNECT NODE HEALTH"
 )
 
 # Extract lines between two consecutive "=== ... ===" headers for a named section.
@@ -1071,6 +1233,41 @@ for i in $(seq 0 $((REACHABLE_COUNT - 1))); do
   ena="${ENA_EX[$n]}"
   [[ "$ena" != "0" && -n "$ena" ]] && \
     RED_FLAGS+=("**$n**: ENA allowance_exceeded counters non-zero → EC2 network throttling (silent packet drop)")
+
+  # ── Connect-node-specific red flags (only meaningful on the connect node) ──
+  # These are extracted from the CONNECT NODE HEALTH section of that node's report.
+  if [[ "$n" == "connect" ]]; then
+    connect_report="${REPORT_FILES[$i]}"
+
+    # Flag any connector or task not in RUNNING state
+    # Pattern: "connector=FAILED", "connector=PAUSED", "task[N]: FAILED", etc.
+    while IFS= read -r line; do
+      RED_FLAGS+=("**connect**: $line")
+    done < <(grep -iE 'connector=(FAILED|PAUSED|UNASSIGNED)|task\[[0-9]+\]: (FAILED|PAUSED|UNASSIGNED)' \
+      "$connect_report" 2>/dev/null | sed 's/^[[:space:]]*//' | sort -u)
+
+    # Flag non-empty DLQ topics
+    while IFS= read -r line; do
+      RED_FLAGS+=("**connect**: DLQ — $line")
+    done < <(grep -iE 'NEEDS INVESTIGATION' "$connect_report" 2>/dev/null)
+
+    # Flag Schema Registry unreachable
+    grep -qi 'unreachable' <(grep -A1 'Schema Registry' "$connect_report" 2>/dev/null) 2>/dev/null && \
+      RED_FLAGS+=("**connect**: Schema Registry unreachable on :8081 — connectors will stall on schema registration")
+
+    # Flag ConnectDistributed process not found
+    grep -qi 'NOT FOUND' "$connect_report" 2>/dev/null && \
+      RED_FLAGS+=("**connect**: ConnectDistributed process not running in one or more worker containers")
+
+    # Flag non-zero consumer group lag on sink connectors
+    # kafka-consumer-groups output has LAG in column 6; flag any non-zero value
+    while IFS= read -r line; do
+      RED_FLAGS+=("**connect**: Sink consumer lag — $line")
+    done < <(grep -iE 'CONSUMER-ID|HOST' "$connect_report" 2>/dev/null | head -0; \
+      awk '/connect-jdbc-sink/{
+        lag=$6; if (lag ~ /^[0-9]+$/ && lag+0 > 0) print "group="$1" topic="$2" partition="$3" lag="lag
+      }' "$connect_report" 2>/dev/null | sort -u)
+  fi
 done
 
 RED_FLAG_COUNT="${#RED_FLAGS[@]}"
@@ -1238,6 +1435,18 @@ for flag in "${RED_FLAGS[@]}"; do
     *"fd limit"*)
       # CP system requirements: brokers need ≥100,000 FDs.
       emit_fix FD "**Raise file descriptor limit:** Add to \`/etc/security/limits.d/99-kafka.conf\`: \`* hard nofile 131072\` and \`* soft nofile 131072\`. CP minimum: 100,000 for brokers (1 FD per partition per log segment), 16,384 for Control Center. Requires container restart to take effect." ;;
+    *"connector=FAILED"*|*"task["*"FAILED"*)
+      emit_fix CONNECTOR_FAILED "**Restart failed connector/task:** \`curl -X POST http://localhost:8083/connectors/<name>/restart\` (or :8084 for reverse worker). Check the error trace in \`raw/connect-audit.txt\` under CONNECT NODE HEALTH. Common causes: DB unreachable, schema incompatibility, or OOM in the Connect worker. If task keeps failing, check DLQ for the failure record." ;;
+    *"connector=PAUSED"*|*"task["*"PAUSED"*)
+      emit_fix CONNECTOR_PAUSED "**Resume paused connector:** \`curl -X PUT http://localhost:8083/connectors/<name>/resume\`. A paused connector was deliberately paused (or a previous restart attempt paused it). Verify the underlying issue is resolved before resuming." ;;
+    *"DLQ"*"NEEDS INVESTIGATION"*)
+      emit_fix DLQ "**Investigate DLQ records:** \`docker exec connect-1 kafka-console-consumer --bootstrap-server <bootstrap> --topic dlq-jdbc-sink-aurora --from-beginning --property print.headers=true --timeout-ms 10000\`. Each DLQ record has 10 \`__connect.errors.*\` headers including the exception class, message, and stack trace. Common causes: schema mismatch (column added/removed), PK constraint violation (duplicate record), or type coercion failure." ;;
+    *"Schema Registry unreachable"*)
+      emit_fix SR "**Restore Schema Registry:** \`docker ps | grep schema-registry\` on the connect node. If the container is down: \`cd ~/cdc-on-ec2-docker && docker compose -f docker-compose.yml -f docker-compose.connect-schema-registry.yml up -d schema-registry\`. Source connectors using Avro will stall and timeout until SR is reachable." ;;
+    *"ConnectDistributed process not running"*)
+      emit_fix CONNECT_DOWN "**Restart Connect worker:** \`bash scripts/5-start-node.sh connect\` from the jumpbox (dispatches via SSM). Check worker logs: \`docker logs connect-1 --tail 100\` and \`docker logs connect-2 --tail 100\`. Common causes: OOM kill (check \`dmesg | grep -i oom\`), port conflict on 8083/8084, or failed schema evolution." ;;
+    *"Sink consumer lag"*)
+      emit_fix LAG "**Investigate sink connector lag:** High consumer group lag means records are queuing in Kafka faster than the sink can write to the DB. Check: (1) target DB connection pool exhaustion, (2) \`JDBC_SINK_BATCH_SIZE\` too small — increase to 3000+, (3) DB write latency high — check Aurora/SQL Server query performance, (4) connector task count — scale with \`tasks.max\` in the connector config." ;;
   esac
 done
 
