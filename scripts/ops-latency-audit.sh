@@ -87,22 +87,54 @@
 #                   .env keys: BROKER_*_INSTANCE_ID, CONNECT_1_INSTANCE_ID, MONITOR_1_INSTANCE_ID
 #   ssh           — uses direct SSH; .env keys: SSH_KEY_PATH, BROKER_*_IP, CONNECT_1_IP, MONITOR_1_IP
 #
-# RED FLAG THRESHOLDS
-# -------------------
-#   vm.swappiness > 1          Swap causes unpredictable broker pause spikes
-#   THP = [always]             Huge page allocation stalls → GC pauses
-#   noatime missing            Extra metadata writes on every log segment read
-#   I/O scheduler not mq-deadline/none  CFQ/BFQ add latency on NVMe
-#   ENA *_allowance_exceeded > 0        EC2 network burst limit being hit
-#   fd limit < 100000          Kafka opens 1 FD per partition per segment
-#   JVM heap > 6 GB            G1GC stop-the-world scales with heap size
-#   GC not G1GC/ZGC            CMS/Parallel add multi-second pauses
-#   num.io.threads < 8         Disk I/O queue backs up under replication load
-#   num.network.threads < 8    Request processor pool too small for busy brokers
-#   socket buffers at default  102400 bytes is ~10x too small for 1 Gbps CDC
-#   unclean.leader.election=true        Data loss on partition leader failover
-#   min.insync.replicas < 2    With RF=3, one broker outage loses ack'd writes
-#   under-replicated partitions > 0     Active replication lag
+# RED FLAG THRESHOLDS  (sources: CP 8.x system requirements, Apache Kafka 3.8 broker defaults,
+#                       Confluent perf blog, Netflix/Brendan Gregg EC2 tuning guide)
+# --------------------------------------------------------------------------------------------
+#   vm.swappiness > 1          Causes unpredictable broker pause spikes under memory pressure.
+#                              Set to 1 (not 0 — 0 makes OOM killer more aggressive).
+#   THP = [always]             Kernel compacts memory to create 2 MB pages; compaction stalls
+#                              can pause any thread for 10–100 ms. [madvise] is acceptable.
+#   noatime missing            Linux updates atime on every file read by default. For Kafka
+#                              replication fetches across many segments, this adds a metadata
+#                              write per fetch. noatime eliminates it.
+#   I/O scheduler not          CFQ/BFQ add software scheduling overhead that degrades NVMe
+#     mq-deadline/none         throughput. mq-deadline gives predictable latency bounds.
+#                              'none' is also correct for NVMe (drive has its own queue).
+#   ENA *_allowance_exceeded>0 EC2 silently drops packets when a burst allowance is exceeded
+#                              (no error, just retransmits). Non-zero = instance undersized.
+#   fd limit < 100000          Kafka opens 1 FD per partition per log segment. 100,000 is the
+#                              Confluent-documented minimum (CP system requirements page).
+#                              Control Center minimum is 16,384.
+#   Broker JVM heap > 6 GB    Kafka stores data in the OS page cache, not the heap. Heap
+#                              holds metadata, request buffers, and GC objects. G1GC pause
+#                              time scales with live heap — 4–6 GB is the CP recommendation.
+#                              CP 8.x ships with Java 21: use ZGC Generational for sub-ms
+#                              pauses (-XX:+UseZGC -XX:+ZGenerational). G1GC is still fine.
+#                              Note: Connect heap (0.5–8 GB) is NOT flagged — it is sized
+#                              differently based on connector count, not the broker rule.
+#   GC not G1GC/ZGC            CMS (deprecated) and Parallel GC have stop-the-world phases
+#                              that can pause a broker for seconds under heap pressure.
+#   num.io.threads < vCPU      Kafka default is 8. On i3.4xlarge (16 vCPU) this is
+#                              under-provisioned. Confluent recommends matching vCPU count
+#                              for disk-I/O-heavy workloads (CDC replication is I/O bound).
+#   num.network.threads < 3    Kafka default is 3. Confluent recommends ≥8 for busy brokers
+#                              handling producer + consumer + replication connections.
+#   num.replica.fetchers < 4   Kafka default is 1. For CDC with multiple source tables,
+#                              under-replicated partitions can cause connector lag. Confluent
+#                              recommends 4 for high-throughput replication.
+#   socket buffers ≤ 102400    Kafka broker default is 102400 bytes. This project sets 1 MB
+#                              (KAFKA_SOCKET_SEND/RECEIVE_BUFFER_BYTES=1048576 in .env.template).
+#                              OS ceiling (net.core.rmem_max) should be ≥ 16 MB per Netflix
+#                              EC2 tuning guide to allow the broker to use larger buffers.
+#   dirty_ratio > 80 or        vm.dirty_ratio=80, vm.dirty_background_ratio=5 is the
+#     bg_ratio > 5             Confluent-recommended baseline. Higher dirty_ratio increases
+#                              risk of a large write-back stall; lower increases I/O pressure.
+#   unclean.leader.election=   Allows an out-of-sync replica to become leader. Acknowledged
+#     true                     writes on the old leader that weren't replicated are silently
+#                              lost. Should always be false in CDC deployments.
+#   min.insync.replicas < 2    Kafka default is 1. With RF=3, producers using acks=all and
+#                              MIR=1 get no durability guarantee. Set to 2 for production CDC.
+#   under-replicated parts > 0 Active replication lag — any non-zero value needs investigation.
 #
 # TIMING
 # ------
@@ -379,10 +411,14 @@ if $LOCAL_MODE; then
     echo ""
 
     # ── Section 7: JVM Configuration ─────────────────────────────────────────
-    # Heap sizing for Kafka brokers: the JVM heap holds the metadata cache and
-    # request buffers, NOT the data itself (data goes through the page cache).
-    # 4-6 GB is the Confluent-recommended range. Larger heaps mean more objects
-    # for G1GC to scan in its mixed-collection phase, which lengthens pauses.
+    # Heap sizing: Kafka stores data in the OS page cache, not the JVM heap.
+    # The heap holds metadata, request objects, and GC structures only.
+    # Confluent-recommended range: 4–6 GB (tested with G1GC flags below).
+    # CP 8.x ships Java 21 — ZGC Generational (-XX:+UseZGC -XX:+ZGenerational)
+    # delivers sub-ms pause times and scales better than G1GC at larger heaps.
+    # Confluent-tested G1GC flags (JDK 8u5+, still valid on 17/21):
+    #   -XX:MaxGCPauseMillis=20 -XX:InitiatingHeapOccupancyPercent=35
+    #   -XX:G1HeapRegionSize=16M -XX:MetaspaceSize=96m
     #
     # We read JVM flags from /proc/<pid>/cmdline first (most accurate), then
     # fall back to docker inspect (when the process isn't visible from inside
@@ -423,6 +459,13 @@ for c in d:
     # rather than server.properties because in KRaft + Docker Compose mode, Confluent
     # translates KAFKA_* env vars to server.properties at container startup. The env
     # vars are the authoritative source; server.properties may not exist as a static file.
+    #
+    # Kafka 3.8 defaults (confirmed from broker-configs documentation):
+    #   num.io.threads = 8          (flag if < vCPU count — i3.4xlarge needs 16)
+    #   num.network.threads = 3     (flag if < 8 for busy CDC brokers)
+    #   num.replica.fetchers = 1    (flag if < 4 for high-throughput CDC)
+    #   socket.send.buffer.bytes = 102400   (this project sets 1048576 = 1 MB)
+    #   socket.receive.buffer.bytes = 102400
     echo "=== KAFKA BROKER CONFIGURATION ==="
     echo "--- Tuning vars from broker container env ---"
     docker inspect broker 2>/dev/null | \
@@ -431,9 +474,9 @@ import sys, json
 d = json.load(sys.stdin)
 # Keys that directly map to latency-relevant broker settings
 keys = [
-    'NUM_IO_THREADS',        # disk I/O thread pool — should match vCPU count
-    'NUM_NETWORK_THREADS',   # request processor threads — should be >=8
-    'NUM_REPLICA_FETCHERS',  # replication parallelism per broker
+    'NUM_IO_THREADS',        # default=8; for i3.4xlarge should be 16 (= vCPU count)
+    'NUM_NETWORK_THREADS',   # default=3; Confluent recommends >=8 for busy brokers
+    'NUM_REPLICA_FETCHERS',  # default=1; Confluent recommends >=4 for CDC throughput
     'SOCKET_SEND_BUFFER',    # OS socket send buffer (bytes)
     'SOCKET_RECEIVE_BUFFER', # OS socket receive buffer (bytes)
     'MIN_INSYNC_REPLICAS',   # durability floor (should be 2 with RF=3)
@@ -886,8 +929,9 @@ echo -e "${BOLD}${BLUE}▶ Phase 4: Generating FINDINGS.md${NC}"
 declare -a RED_FLAGS=()
 
 declare -A SWAPPINESS=() THP=() NOATIME=() IOSCHEDULER=() ENA_EX=()
-declare -A FD_LIMIT=() JVM_HEAP=() GC_ALGO=()
-declare -A NUM_IO=() NUM_NET=() SOCK_BUF=() UNCLEAN=() MIR=() UNDER_REP=()
+declare -A FD_LIMIT=() JVM_HEAP=() GC_ALGO=() DIRTY_RATIO=()
+declare -A NUM_IO=() NUM_NET=() NUM_FETCHERS=() SOCK_BUF=() \
+           UNCLEAN=() MIR=() UNDER_REP=()
 
 for i in $(seq 0 $((REACHABLE_COUNT - 1))); do
   n="${REACHABLE_NAMES[$i]}"; r="${REPORT_FILES[$i]}"
@@ -907,8 +951,8 @@ for i in $(seq 0 $((REACHABLE_COUNT - 1))); do
   IOSCHEDULER["$n"]=$(grep -oE '\[(mq-deadline|none|deadline|cfq|bfq|kyber)\]' \
     "$r" 2>/dev/null | head -1 || echo "?")
 
-  # Non-zero allowance counters indicate throttling. We skip lines ending in " 0"
-  # (zero counter) and capture the first remaining line.
+  # Non-zero allowance counters indicate EC2 network throttling. We skip lines
+  # ending in " 0" (zero counter) and capture the first remaining line.
   ENA_EX["$n"]=$(grep -iE 'allowance_exceeded' "$r" 2>/dev/null | \
     grep -v ' 0$' | head -1 || echo "0")
 
@@ -923,13 +967,20 @@ for i in $(seq 0 $((REACHABLE_COUNT - 1))); do
   GC_ALGO["$n"]=$(grep -oE 'UseG1GC|UseZGC|UseShenandoahGC|UseCMS|UseParallelGC' \
     "$r" 2>/dev/null | head -1 || echo "?")
 
+  # Kafka 3.8 defaults: num.io.threads=8, num.network.threads=3, num.replica.fetchers=1
   NUM_IO["$n"]=$(grep -iE 'NUM_IO_THREADS|num\.io\.threads' "$r" 2>/dev/null | \
     grep -oE '[0-9]+' | head -1 || echo "?")
 
   NUM_NET["$n"]=$(grep -iE 'NUM_NETWORK_THREADS|num\.network\.threads' "$r" 2>/dev/null | \
     grep -oE '[0-9]+' | head -1 || echo "?")
 
+  NUM_FETCHERS["$n"]=$(grep -iE 'NUM_REPLICA_FETCHERS|num\.replica\.fetchers' "$r" 2>/dev/null | \
+    grep -oE '[0-9]+' | head -1 || echo "?")
+
   SOCK_BUF["$n"]=$(grep -iE 'SOCKET_SEND_BUFFER|socket\.send\.buffer' "$r" 2>/dev/null | \
+    grep -oE '[0-9]+' | head -1 || echo "?")
+
+  DIRTY_RATIO["$n"]=$(grep -iE 'vm\.dirty_ratio\s*=' "$r" 2>/dev/null | \
     grep -oE '[0-9]+' | head -1 || echo "?")
 
   UNCLEAN["$n"]=$(grep -iE 'UNCLEAN_LEADER|unclean\.leader\.election' "$r" 2>/dev/null | \
@@ -945,46 +996,73 @@ for i in $(seq 0 $((REACHABLE_COUNT - 1))); do
 
   sw="${SWAPPINESS[$n]}"
   [[ "$sw" =~ ^[0-9]+$ && $sw -gt 1 ]] && \
-    RED_FLAGS+=("**$n**: vm.swappiness=$sw (should be ≤1)")
+    RED_FLAGS+=("**$n**: vm.swappiness=$sw (should be ≤1; 0 is too aggressive)")
 
   [[ "${THP[$n]}" == "[always]" ]] && \
-    RED_FLAGS+=("**$n**: THP = [always] (should be [never] — causes GC pause spikes)")
+    RED_FLAGS+=("**$n**: THP=[always] → memory compaction stalls up to 100 ms; set to [never]")
 
   [[ "${NOATIME[$n]}" == "missing" ]] && \
-    RED_FLAGS+=("**$n**: noatime not found on Kafka log dir mount")
+    RED_FLAGS+=("**$n**: noatime missing on Kafka log dir mount (adds metadata write per segment read)")
 
   fd="${FD_LIMIT[$n]}"
+  # Confluent CP system requirements: brokers need ≥100,000; CC needs ≥16,384
   [[ "$fd" =~ ^[0-9]+$ && $fd -lt 100000 ]] && \
-    RED_FLAGS+=("**$n**: fd limit=$fd (should be ≥100000)")
+    RED_FLAGS+=("**$n**: fd limit=$fd (CP minimum is 100,000 for brokers, 16,384 for Control Center)")
 
   heap="${JVM_HEAP[$n]}"; heap_gb=0
   [[ "$heap" =~ ^([0-9]+)[gG]$ ]] && heap_gb="${BASH_REMATCH[1]}"
   [[ "$heap" =~ ^([0-9]+)[mM]$ ]] && heap_gb=$(( BASH_REMATCH[1] / 1024 ))
-  [[ $heap_gb -gt 6 ]] && \
-    RED_FLAGS+=("**$n**: JVM heap=${heap} (>6 GB → longer GC pauses; target 4–6 GB)")
+  # Only flag broker/monitor nodes — Connect heap (0.5–8 GB) is sized differently
+  # (depends on connector count, not the broker page-cache rule).
+  if [[ $heap_gb -gt 6 ]] && [[ "$n" != "connect" ]]; then
+    RED_FLAGS+=("**$n**: JVM heap=${heap} (>6 GB on broker node → longer G1GC pauses; CP recommends 4–6 GB with -Xms6g -Xmx6g)")
+  fi
 
   gc="${GC_ALGO[$n]}"
+  # CP 8.x ships Java 21; ZGC Generational is preferred for sub-ms pauses.
+  # G1GC is still acceptable. Flag CMS (deprecated), Parallel, or Shenandoah.
   [[ -n "$gc" && "$gc" != "?" && "$gc" != "UseG1GC" && "$gc" != "UseZGC" ]] && \
-    RED_FLAGS+=("**$n**: GC=${gc} (prefer G1GC or ZGC for low-latency Kafka)")
+    RED_FLAGS+=("**$n**: GC=${gc} (CP 8.x / Java 21: use -XX:+UseZGC -XX:+ZGenerational or -XX:+UseG1GC)")
 
   io="${NUM_IO[$n]}"
+  # Kafka 3.8 default = 8. i3.4xlarge has 16 vCPUs; Confluent recommends matching
+  # vCPU count for I/O-bound CDC workloads. Flag if below vCPU count (proxy: <16
+  # for i3.4xlarge). Use <8 as safe lower bound for any node type.
   [[ "$io" =~ ^[0-9]+$ && $io -lt 8 ]] && \
-    RED_FLAGS+=("**$n**: num.io.threads=$io (should match vCPU count, typically ≥8)")
+    RED_FLAGS+=("**$n**: num.io.threads=$io (Kafka default=8; for i3.4xlarge set to 16 = vCPU count)")
 
   nt="${NUM_NET[$n]}"
+  # Kafka 3.8 default = 3. Confluent recommends ≥8 for brokers handling CDC
+  # producer + consumer + replication connections simultaneously.
   [[ "$nt" =~ ^[0-9]+$ && $nt -lt 8 ]] && \
-    RED_FLAGS+=("**$n**: num.network.threads=$nt (should be ≥8)")
+    RED_FLAGS+=("**$n**: num.network.threads=$nt (Kafka default=3; Confluent recommends ≥8 for busy CDC brokers)")
+
+  nf="${NUM_FETCHERS[$n]}"
+  # Kafka 3.8 default = 1. For CDC with many partitions across 3 brokers,
+  # Confluent recommends ≥4 to prevent replication lag bottleneck.
+  [[ "$nf" =~ ^[0-9]+$ && $nf -lt 4 ]] && \
+    RED_FLAGS+=("**$n**: num.replica.fetchers=$nf (Kafka default=1; Confluent recommends ≥4 for high-throughput CDC)")
 
   sb="${SOCK_BUF[$n]}"
+  # Kafka 3.8 default = 102400 (100 KB). This project sets 1 MB in .env.template.
+  # Flag anything still at the Kafka default — the OS ceiling (net.core.rmem_max)
+  # should be ≥16 MB (Netflix EC2 tuning guide) to allow larger buffers.
   [[ "$sb" =~ ^[0-9]+$ && $sb -le 102400 ]] && \
-    RED_FLAGS+=("**$n**: socket.send.buffer.bytes=$sb (default 102400 — increase to 4 MB)")
+    RED_FLAGS+=("**$n**: socket.send.buffer.bytes=$sb (Kafka default=102400; this project sets 1 MB; OS ceiling should be 16 MB)")
+
+  dr="${DIRTY_RATIO[$n]}"
+  # Confluent recommended: vm.dirty_ratio=80, vm.dirty_background_ratio=5.
+  # Higher dirty_ratio risks a large write-back stall; lower increases I/O pressure.
+  [[ "$dr" =~ ^[0-9]+$ && $dr -gt 80 ]] && \
+    RED_FLAGS+=("**$n**: vm.dirty_ratio=$dr (Confluent recommends 80; higher risks large write-back stall)")
 
   [[ "${UNCLEAN[$n]}" == "true" ]] && \
-    RED_FLAGS+=("**$n**: unclean.leader.election.enable=true (data loss risk on failover)")
+    RED_FLAGS+=("**$n**: unclean.leader.election.enable=true (data loss risk — out-of-sync replica can become leader)")
 
   mir="${MIR[$n]}"
+  # Kafka default = 1. With RF=3 and MIR=1, acks=all gives no real durability guarantee.
   [[ "$mir" =~ ^[0-9]+$ && $mir -lt 2 ]] && \
-    RED_FLAGS+=("**$n**: min.insync.replicas=$mir (should be 2 with RF=3)")
+    RED_FLAGS+=("**$n**: min.insync.replicas=$mir (Kafka default=1; must be 2 with RF=3 for production CDC)")
 
   ur="${UNDER_REP[$n]}"
   [[ "$ur" =~ ^[0-9]+$ && $ur -gt 0 ]] && \
@@ -992,7 +1070,7 @@ for i in $(seq 0 $((REACHABLE_COUNT - 1))); do
 
   ena="${ENA_EX[$n]}"
   [[ "$ena" != "0" && -n "$ena" ]] && \
-    RED_FLAGS+=("**$n**: ENA allowance_exceeded counters non-zero → network throttling")
+    RED_FLAGS+=("**$n**: ENA allowance_exceeded counters non-zero → EC2 network throttling (silent packet drop)")
 done
 
 RED_FLAG_COUNT="${#RED_FLAGS[@]}"
@@ -1064,6 +1142,7 @@ emit_row() {
 }
 
 emit_row "vm.swappiness"            SWAPPINESS
+emit_row "vm.dirty_ratio"           DIRTY_RATIO
 emit_row "THP"                      THP
 emit_row "noatime"                  NOATIME
 emit_row "I/O scheduler"            IOSCHEDULER
@@ -1072,6 +1151,7 @@ emit_row "JVM heap"                 JVM_HEAP
 emit_row "GC algorithm"             GC_ALGO
 emit_row "num.io.threads"           NUM_IO
 emit_row "num.network.threads"      NUM_NET
+emit_row "num.replica.fetchers"     NUM_FETCHERS
 emit_row "socket.send.buffer"       SOCK_BUF
 emit_row "unclean.leader.election"  UNCLEAN
 emit_row "min.insync.replicas"      MIR
@@ -1120,31 +1200,44 @@ emit_fix() {
 for flag in "${RED_FLAGS[@]}"; do
   case "$flag" in
     *"[always]"*)
-      emit_fix THP "**Disable Transparent Huge Pages:** \`echo never > /sys/kernel/mm/transparent_hugepage/enabled\` and persist via \`/etc/rc.local\` or a systemd unit. THP compaction can pause any thread for 10–100 ms." ;;
+      emit_fix THP "**Disable Transparent Huge Pages:** \`echo never > /sys/kernel/mm/transparent_hugepage/enabled\` and persist via a systemd unit or \`/etc/rc.local\`. THP kernel compaction can stall any thread for 10–100 ms. [madvise] is also acceptable." ;;
     *swappiness*)
-      emit_fix SWAP "**Set vm.swappiness=1:** \`sysctl -w vm.swappiness=1\` + persist in \`/etc/sysctl.d/99-kafka.conf\`. Value 1 retains swap as OOM last resort without proactive swapping." ;;
+      emit_fix SWAP "**Set vm.swappiness=1:** \`sysctl -w vm.swappiness=1\` + persist in \`/etc/sysctl.d/99-kafka.conf\`. Use 1, not 0 — 0 makes the OOM killer more aggressive under memory pressure. Recommended by Confluent and Netflix EC2 tuning guide." ;;
     *noatime*)
-      emit_fix NOATIME "**Add noatime to Kafka log dir mount:** Edit \`/etc/fstab\`, append \`noatime\` to mount options for \`/data/kafka\`. Removes one metadata write per log segment read." ;;
-    *"socket.send.buffer"*|*"102400"*)
-      emit_fix SOCKBUF "**Increase socket buffers:** Set \`socket.send.buffer.bytes=4194304\` and \`socket.receive.buffer.bytes=4194304\` in \`KAFKA_SOCKET_SEND_BUFFER_BYTES\` / \`KAFKA_SOCKET_RECEIVE_BUFFER_BYTES\` in .env. Also raise OS limits: \`net.core.rmem_max=4194304\` and \`net.core.wmem_max=4194304\`." ;;
+      emit_fix NOATIME "**Add noatime to Kafka log dir mount:** Edit \`/etc/fstab\`, append \`noatime\` to mount options for \`/data/kafka\`. Linux updates atime on every segment read by default; noatime removes that metadata write." ;;
+    *"Kafka default=102400"*)
+      # OS ceiling per Netflix/Brendan Gregg EC2 Kafka guide: net.core.rmem_max = 16 MB.
+      # This project's .env.template sets broker socket buffers to 1 MB (1048576).
+      emit_fix SOCKBUF "**Raise OS socket buffer ceiling to 16 MB:** \`net.core.rmem_max=16777216\` and \`net.core.wmem_max=16777216\` (Netflix EC2 Kafka tuning). The broker socket buffer setting in .env (\`KAFKA_SOCKET_SEND/RECEIVE_BUFFER_BYTES=1048576\`) cannot exceed the OS ceiling. Persist in \`/etc/sysctl.d/99-kafka.conf\`." ;;
     *num.io.threads*)
-      emit_fix IOTHREADS "**Increase num.io.threads:** Set \`KAFKA_NUM_IO_THREADS\` to vCPU count (i3.4xlarge = 16). I/O threads handle log appends and replication fetches — too few causes queue build-up." ;;
+      # Kafka 3.8 default = 8. i3.4xlarge = 16 vCPU; Confluent recommends matching vCPU count.
+      emit_fix IOTHREADS "**Increase num.io.threads to vCPU count:** Set \`KAFKA_NUM_IO_THREADS=16\` (i3.4xlarge = 16 vCPU). Kafka default is 8. I/O threads handle log appends and replication reads — under-provisioning causes request queue build-up under CDC load." ;;
     *num.network.threads*)
-      emit_fix NETTHREADS "**Increase num.network.threads:** Set \`KAFKA_NUM_NETWORK_THREADS=8\` (minimum). Controls request processor pool for producer/consumer connections." ;;
-    *">6 GB"*|*"longer GC"*)
-      emit_fix HEAP "**Reduce JVM heap to 4–6 GB:** Set \`KAFKA_HEAP_OPTS='-Xmx6g -Xms6g'\`. Kafka stores data in the OS page cache (not heap), so large heaps only increase G1GC scan time." ;;
+      # Kafka 3.8 default = 3. Confluent recommends ≥8 for busy brokers.
+      emit_fix NETTHREADS "**Increase num.network.threads to ≥8:** Set \`KAFKA_NUM_NETWORK_THREADS=8\`. Kafka default is 3, which is insufficient for concurrent CDC producer + consumer + replication connections. Confluent recommends ≥8." ;;
+    *num.replica.fetchers*)
+      # Kafka 3.8 default = 1. Confluent recommends ≥4 for high-throughput CDC.
+      emit_fix FETCHERS "**Increase num.replica.fetchers to ≥4:** Set \`KAFKA_NUM_REPLICA_FETCHERS=4\`. Kafka default is 1 fetcher thread per source broker. With 3 brokers and many CDC partitions, 1 thread creates a replication bottleneck and drives up under-replicated partition counts." ;;
+    *"JVM heap"*|*">6 GB on broker"*)
+      # Confluent-tested flags: -Xms6g -Xmx6g with G1GC tuning.
+      # CP 8.x Java 21: ZGC Generational preferred for sub-ms pauses.
+      emit_fix HEAP "**Tune broker JVM heap:** Set \`KAFKA_HEAP_OPTS='-Xms6g -Xmx6g'\` (CP-tested: equal min/max eliminates resize GC). Kafka data lives in the OS page cache — large heaps extend GC scan time with no benefit. On Java 21 (CP 8.x): add \`-XX:+UseZGC -XX:+ZGenerational\` for <1 ms pauses, or use CP-tested G1GC flags: \`-XX:MaxGCPauseMillis=20 -XX:InitiatingHeapOccupancyPercent=35 -XX:G1HeapRegionSize=16M\`." ;;
     *"GC="*)
-      emit_fix GC "**Switch GC algorithm:** Add \`-XX:+UseG1GC\` (Java 8–16) or \`-XX:+UseZGC\` (Java 17+) to \`KAFKA_HEAP_OPTS\`. Eliminates stop-the-world pauses from CMS or Parallel GC." ;;
+      emit_fix GC "**Switch to ZGC or G1GC:** CP 8.x ships Java 21. Use \`-XX:+UseZGC -XX:+ZGenerational\` for sub-millisecond stop-the-world pauses (ZGC guarantee: <1 ms). G1GC (\`-XX:+UseG1GC\`) is also acceptable. CMS is deprecated since Java 14; Parallel GC causes multi-second pauses under heap pressure." ;;
+    *dirty_ratio*)
+      emit_fix DIRTY "**Tune dirty page ratios:** \`vm.dirty_ratio=80\` and \`vm.dirty_background_ratio=5\` (Confluent-recommended). Higher dirty_ratio risks a large synchronous write-back stall; lower causes continuous background I/O pressure. Persist in \`/etc/sysctl.d/99-kafka.conf\`." ;;
     *unclean*)
-      emit_fix UNCLEAN "**Disable unclean leader election:** Set \`KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE=false\`. Prevents an out-of-sync replica from being promoted to leader and losing data." ;;
+      emit_fix UNCLEAN "**Disable unclean leader election:** Set \`KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE=false\`. A lagging replica elected as leader will be missing writes the old leader acknowledged but hadn't yet replicated — silent data loss in CDC pipelines." ;;
     *min.insync*)
-      emit_fix MIR "**Set min.insync.replicas=2:** Set \`KAFKA_MIN_INSYNC_REPLICAS=2\`. With RF=3, this ensures a producer using \`acks=all\` gets confirmation from at least 2 brokers." ;;
+      # Kafka default = 1. With RF=3 and MIR=1, acks=all is not meaningfully durable.
+      emit_fix MIR "**Set min.insync.replicas=2:** Set \`KAFKA_MIN_INSYNC_REPLICAS=2\`. Kafka default is 1. With RF=3 and MIR=2, \`acks=all\` requires 2 of 3 brokers to confirm before the producer gets an ack — tolerates 1 broker failure without data loss." ;;
     *under-replicated*)
-      emit_fix URP "**Investigate under-replicated partitions:** Run \`docker exec broker kafka-topics --bootstrap-server localhost:9092 --describe --under-replicated-partitions\`. Common causes: GC pauses, NVMe saturation, or a broker still catching up after restart." ;;
+      emit_fix URP "**Investigate under-replicated partitions:** \`docker exec broker kafka-topics --bootstrap-server localhost:9092 --describe --under-replicated-partitions\`. Common causes: GC pauses, NVMe I/O saturation, \`num.replica.fetchers=1\` bottleneck, or a recently restarted broker still catching up." ;;
     *allowance_exceeded*|*throttling*)
-      emit_fix ENA "**Investigate ENA network throttling:** Non-zero \`*_allowance_exceeded\` counters mean the instance is hitting EC2 network burst limits. Check with \`ethtool -S eth0 | grep allowance\`. Consider a larger instance type or reducing replication factor on high-volume topics." ;;
+      emit_fix ENA "**Address EC2 network throttling:** Non-zero \`*_allowance_exceeded\` counters mean the hypervisor is silently dropping packets (no error — just retransmits and latency spikes). Monitor live: \`ethtool -S eth0 | grep allowance\`. Remediation: upgrade instance type, reduce \`num.replica.fetchers\` to lower replication bandwidth, or move high-volume topics to fewer partitions." ;;
     *"fd limit"*)
-      emit_fix FD "**Raise open file descriptor limit:** Add to \`/etc/security/limits.d/99-kafka.conf\`: \`* hard nofile 131072\` and \`* soft nofile 131072\`. Restart the broker container to apply." ;;
+      # CP system requirements: brokers need ≥100,000 FDs.
+      emit_fix FD "**Raise file descriptor limit:** Add to \`/etc/security/limits.d/99-kafka.conf\`: \`* hard nofile 131072\` and \`* soft nofile 131072\`. CP minimum: 100,000 for brokers (1 FD per partition per log segment), 16,384 for Control Center. Requires container restart to take effect." ;;
   esac
 done
 
