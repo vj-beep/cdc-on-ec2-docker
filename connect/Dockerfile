@@ -49,3 +49,7 @@ ENV JAVA_TOOL_OPTIONS= \
 # Copy the Microsoft SQL Server JDBC driver (not bundled with Confluent or Debezium).
 # Download mssql-jdbc-12.4.2.jre11.jar from Microsoft and place it in connect/jars/ before building.
 COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
+
+# Pre-built SMT jar (compiled on jumpbox from connect/smt/ — no Maven build stage needed).
+# Placed in /usr/share/java so it is loaded by the worker classloader, not a connector-isolated one.
+COPY connect/jars/strip-null-bytes-smt.jar /usr/share/java/
