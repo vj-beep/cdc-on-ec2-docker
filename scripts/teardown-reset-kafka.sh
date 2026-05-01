@@ -74,11 +74,13 @@ set -u
 
 DRY_RUN=false
 SKIP_CONFIRM=false
+SKIP_RESTART=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --dry-run)  DRY_RUN=true; shift ;;
-    -y|--yes)   SKIP_CONFIRM=true; shift ;;
+    --dry-run)       DRY_RUN=true; shift ;;
+    -y|--yes)        SKIP_CONFIRM=true; shift ;;
+    --skip-restart)  SKIP_RESTART=true; shift ;;
     -h|--help)
       cat <<'EOF'
 Usage: teardown-reset-kafka.sh [OPTIONS]
@@ -86,9 +88,10 @@ Usage: teardown-reset-kafka.sh [OPTIONS]
 Resets all CDC state from Kafka while keeping brokers running.
 
 Options:
-  --dry-run    Show what would be deleted without deleting
-  -y, --yes    Skip confirmation prompt
-  -h, --help   Show this help
+  --dry-run        Show what would be deleted without deleting
+  -y, --yes        Skip confirmation prompt
+  --skip-restart   Skip step 8: do not restart Connect workers after reset
+  -h, --help       Show this help
 
 What it deletes:
   - All connectors (both Connect clusters)
@@ -397,14 +400,17 @@ else
 fi
 echo ""
 
-# ── Step 6: Restart Connect workers ───────────────────────────────────────
+# ── Step 7: Restart Connect workers ───────────────────────────────────────
 
 echo -e "${BOLD}${BLUE}─ Step 7/7: Restart Connect Workers${NC}"
-echo -e "  ${GREY}Connect recreates internal topics (offsets, config, status) on startup${NC}"
 
-if $DRY_RUN; then
+if $SKIP_RESTART; then
+  echo -e "  ${YELLOW}~${NC} Skipped (--skip-restart) — start Connect manually when ready:"
+  echo -e "      ./scripts/5-start-node.sh connect"
+elif $DRY_RUN; then
   echo -e "  ${YELLOW}~${NC} Would restart connect-1 and connect-2 on ${CONNECT_1_IP}"
 else
+  echo -e "  ${GREY}Connect recreates internal topics (offsets, config, status) on startup${NC}"
   run_on_connect "cd ${DEPLOY_DIR} && bash monitoring/jmx-exporter/download-jmx-agent.sh >/dev/null 2>&1 && docker compose -f docker-compose.yml -f docker-compose.connect-schema-registry.yml start connect-1 connect-2" >/dev/null 2>&1
   echo -e "  ${GREEN}●${NC} Connect workers starting"
 
@@ -436,9 +442,17 @@ if $DRY_RUN; then
 else
   echo -e "  ${GREEN}Kafka state reset complete${NC}"
   echo ""
-  echo -e "  Brokers running, Connect workers restarted, topics/groups/subjects cleaned."
-  echo -e "  Next steps:"
-  echo -e "    1. ${BOLD}./scripts/6-deploy-connectors.sh${NC}  — redeploy connectors"
-  echo -e "    2. ${BOLD}./scripts/7-validate-deployment.sh${NC}       — validate infrastructure"
+  if $SKIP_RESTART; then
+    echo -e "  Brokers running, Connect workers stopped, topics/groups/subjects cleaned."
+    echo -e "  Next steps:"
+    echo -e "    1. ${BOLD}./scripts/5-start-node.sh connect${NC}        — start Connect workers"
+    echo -e "    2. ${BOLD}./scripts/6-deploy-connectors.sh${NC}          — redeploy connectors"
+    echo -e "    3. ${BOLD}./scripts/7-validate-deployment.sh${NC}         — validate infrastructure"
+  else
+    echo -e "  Brokers running, Connect workers restarted, topics/groups/subjects cleaned."
+    echo -e "  Next steps:"
+    echo -e "    1. ${BOLD}./scripts/6-deploy-connectors.sh${NC}  — redeploy connectors"
+    echo -e "    2. ${BOLD}./scripts/7-validate-deployment.sh${NC}       — validate infrastructure"
+  fi
 fi
 echo ""
