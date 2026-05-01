@@ -1,22 +1,4 @@
 ARG CP_VERSION=8.0.0
-
-# Build stage: compile the StripNullBytes SMT jar
-FROM maven:3.9-eclipse-temurin-11 AS smt-builder
-ARG PROXY_HOST
-ARG PROXY_PORT=8080
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-ARG NO_PROXY
-ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY} \
-    http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} no_proxy=${NO_PROXY}
-COPY connect/smt /build
-WORKDIR /build
-# Maven ignores HTTP_PROXY env vars — set JVM proxy flags via MAVEN_OPTS in the shell.
-# ENV ${VAR:+...} embeds literal quotes into the value and breaks Maven argument parsing.
-RUN if [ -n "$PROXY_HOST" ]; then \
-      export MAVEN_OPTS="-Dhttp.proxyHost=$PROXY_HOST -Dhttp.proxyPort=$PROXY_PORT -Dhttps.proxyHost=$PROXY_HOST -Dhttps.proxyPort=$PROXY_PORT"; \
-    fi && mvn -B package -DskipTests
-
 FROM confluentinc/cp-server-connect:${CP_VERSION}
 
 # Debezium 3.x required for CP 8.0.0 (kafka-clients 4.0 removed KafkaConsumer.poll(long)
@@ -67,10 +49,3 @@ ENV JAVA_TOOL_OPTIONS= \
 # Copy the Microsoft SQL Server JDBC driver (not bundled with Confluent or Debezium).
 # Download mssql-jdbc-12.4.2.jre11.jar from Microsoft and place it in connect/jars/ before building.
 COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
-
-# Copy the custom StripNullBytes SMT jar into /usr/share/java so it is loaded by the
-# worker classloader (not a connector-isolated classloader). SMTs placed inside a
-# connector plugin subdirectory under confluent-hub-components are invisible to other
-# connectors and to the worker's transform chain — /usr/share/java is on CONNECT_PLUGIN_PATH
-# and is scanned at the worker level, making the SMT available to all connectors.
-COPY --from=smt-builder /build/target/strip-null-bytes-smt.jar /usr/share/java/
