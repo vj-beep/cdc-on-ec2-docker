@@ -62,5 +62,9 @@ ENV JAVA_TOOL_OPTIONS= \
 # Download mssql-jdbc-12.4.2.jre11.jar from Microsoft and place it in connect/jars/ before building.
 COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
 
-# Copy the custom StripNullBytes SMT jar into the JDBC sink connector plugin dir
-COPY --from=smt-builder /build/target/strip-null-bytes-smt.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
+# Copy the custom StripNullBytes SMT jar into /usr/share/java so it is loaded by the
+# worker classloader (not a connector-isolated classloader). SMTs placed inside a
+# connector plugin subdirectory under confluent-hub-components are invisible to other
+# connectors and to the worker's transform chain — /usr/share/java is on CONNECT_PLUGIN_PATH
+# and is scanned at the worker level, making the SMT available to all connectors.
+COPY --from=smt-builder /build/target/strip-null-bytes-smt.jar /usr/share/java/
