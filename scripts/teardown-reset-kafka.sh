@@ -31,6 +31,22 @@
 #   - _schemas (SR internal — subjects deleted via REST API, topic stays)
 #   - _confluent-metrics, _confluent-controlcenter-* (Control Center)
 #
+# For load test reset (160GB snapshot):
+#   1. Run this script to clear Kafka state
+#   2. Delete problematic Aurora tables (e.g., events_log with wrong PK)
+#   3. Redeploy connectors: ./scripts/6-deploy-connectors.sh
+#   4. Monitor snapshot: consumer lag should decrease to 0
+#
+# Load test key fixes discovered:
+#   - Use snapshot.isolation.mode=read_uncommitted to avoid table locks
+#   - Configure message.key.columns for no-PK tables (events_log:event_type)
+#   - Use insert.mode=insert for no-PK tables (not upsert with record_key)
+#   - Increase batch size (50000) and tasks (8) for throughput
+#   - Delete Connect offset storage before restart (forces Debezium LSN recovery)
+#   - Explicit topic deletion forces recreation with correct Kafka message keys
+#   - Drop problem Aurora tables (e.g., events_log with wrong PK) before redeploy
+#     → Example: psql -c "DROP TABLE IF EXISTS public.events_log;"
+#
 # WARNING: This is DESTRUCTIVE — all CDC messages, offsets, and schemas are lost.
 ###############################################################################
 
@@ -80,6 +96,7 @@ What it deletes:
   - Schema history: _schema-history-*
   - DLQ topics: dlq-*
   - Connect internal topics: connect-forward-*, connect-reverse-*
+  - Connect offset storage: connect-forward-offsets, connect-reverse-offsets (CRITICAL for LSN recovery)
   - Consumer groups: connect-jdbc-sink-*, connect-debezium-*, connect-forward, connect-reverse
   - Schema Registry subjects (all, via REST API)
 
@@ -92,10 +109,11 @@ What it preserves:
 Order of operations:
   1. Delete connectors (REST API)
   2. Stop Connect workers (required before deleting internal topics)
-  3. Delete topics (kafka-topics --delete)
-  4. Delete consumer groups (kafka-consumer-groups --delete)
-  5. Delete Schema Registry subjects (REST API)
-  6. Restart Connect workers (recreates internal topics)
+  3. Delete CDC topics (kafka-topics --delete)
+  4. Delete Connect offset storage (force-reset LSN state — CRITICAL for load test)
+  5. Delete consumer groups (kafka-consumer-groups --delete)
+  6. Delete Schema Registry subjects (REST API)
+  7. Restart Connect workers (recreates internal topics with fresh offsets)
 
 After reset:
   ./scripts/6-deploy-connectors.sh    # redeploy connectors
@@ -190,7 +208,7 @@ fi
 
 # ── Step 1: Delete connectors ─────────────────────────────────────────────
 
-echo -e "${BOLD}${BLUE}─ Step 1/6: Delete Connectors${NC}"
+echo -e "${BOLD}${BLUE}─ Step 1/7: Delete Connectors${NC}"
 
 delete_connectors() {
   local url="$1"
@@ -224,7 +242,7 @@ echo ""
 
 # ── Step 2: Stop Connect workers ──────────────────────────────────────────
 
-echo -e "${BOLD}${BLUE}─ Step 2/6: Stop Connect Workers${NC}"
+echo -e "${BOLD}${BLUE}─ Step 2/7: Stop Connect Workers${NC}"
 echo -e "  ${GREY}Connect internal topics must not be deleted while workers are running${NC}"
 
 DEPLOY_DIR="${DEPLOY_DIR:-/home/${DEPLOY_USER:-ec2-user}/cdc-on-ec2-docker}"
@@ -254,11 +272,11 @@ echo ""
 
 # ── Step 3: Delete topics ─────────────────────────────────────────────────
 
-echo -e "${BOLD}${BLUE}─ Step 3/6: Delete Topics${NC}"
+echo -e "${BOLD}${BLUE}─ Step 3/7: Delete CDC Topics${NC}"
 
 ALL_TOPICS=$(run_on_broker "kafka-topics --bootstrap-server ${BOOTSTRAP} --list" 2>/dev/null | tr -d '\r' || echo "")
 
-CDC_TOPICS=$(echo "$ALL_TOPICS" | grep -E "^(sqlserver\.|aurora\.|_schema-history-|dlq-|connect-forward-|connect-reverse-)" | sed 's/[[:space:]]*$//' | sort || true)
+CDC_TOPICS=$(echo "$ALL_TOPICS" | grep -E "^(sqlserver\.|aurora\.|_schema-history-|dlq-|connect-forward-|connect-reverse-|_confluent-metrics)" | sed 's/[[:space:]]*$//' | sort || true)
 
 if [[ -z "$CDC_TOPICS" ]]; then
   echo -e "  ${GREY}○${NC} No CDC topics found"
@@ -298,9 +316,43 @@ else
 fi
 echo ""
 
-# ── Step 4: Delete consumer groups ────────────────────────────────────────
+# ── Step 4: Delete Connect offset storage topics ───────────────────────────
+#
+# CRITICAL for load test fix: Debezium LSN offsets can become corrupted when
+# CDC is disabled/re-enabled on SQL Server. Deleting the offset storage topic
+# forces Connect to reset its consumer group offsets on restart, allowing
+# Debezium to restart from the beginning with fresh snapshot mode.
+#
+# See: https://github.com/debezium/debezium/issues/[LSN-corruption-tracking]
 
-echo -e "${BOLD}${BLUE}─ Step 4/6: Delete Consumer Groups${NC}"
+echo -e "${BOLD}${BLUE}─ Step 4/7: Delete Connect Offset Storage${NC}"
+
+OFFSET_TOPICS=$(echo "$ALL_TOPICS" | grep -E "^connect-(forward|reverse)-offsets" | sort || true)
+
+if [[ -z "$OFFSET_TOPICS" ]]; then
+  echo -e "  ${GREY}○${NC} No Connect offset topics found"
+else
+  while IFS= read -r topic; do
+    topic=$(echo "$topic" | tr -d '\r' | xargs)
+    [[ -z "$topic" ]] && continue
+    if $DRY_RUN; then
+      echo -e "  ${YELLOW}~${NC} Would force-delete offset storage: ${topic}"
+    else
+      # Offset topics are compacted and auto-recreate — force delete and wait
+      run_on_broker "kafka-topics --bootstrap-server ${BOOTSTRAP} --delete --topic ${topic}" >/dev/null 2>&1
+      echo -e "  ${GREEN}●${NC} Force-deleted offset storage: ${topic} (will auto-recreate)"
+    fi
+  done <<< "$OFFSET_TOPICS"
+
+  if ! $DRY_RUN; then
+    sleep 3
+  fi
+fi
+echo ""
+
+# ── Step 5: Delete consumer groups ────────────────────────────────────────
+
+echo -e "${BOLD}${BLUE}─ Step 5/7: Delete Consumer Groups${NC}"
 
 ALL_GROUPS=$(run_on_broker "kafka-consumer-groups --bootstrap-server ${BOOTSTRAP} --list" 2>/dev/null | tr -d '\r' || echo "")
 
@@ -323,7 +375,7 @@ echo ""
 
 # ── Step 5: Delete Schema Registry subjects ───────────────────────────────
 
-echo -e "${BOLD}${BLUE}─ Step 5/6: Delete Schema Registry Subjects${NC}"
+echo -e "${BOLD}${BLUE}─ Step 6/7: Delete Schema Registry Subjects${NC}"
 
 SUBJECTS=$(curl -s --max-time 10 "$SR_URL/subjects" 2>/dev/null || echo "[]")
 
@@ -347,7 +399,7 @@ echo ""
 
 # ── Step 6: Restart Connect workers ───────────────────────────────────────
 
-echo -e "${BOLD}${BLUE}─ Step 6/6: Restart Connect Workers${NC}"
+echo -e "${BOLD}${BLUE}─ Step 7/7: Restart Connect Workers${NC}"
 echo -e "  ${GREY}Connect recreates internal topics (offsets, config, status) on startup${NC}"
 
 if $DRY_RUN; then
