@@ -1,0 +1,64 @@
+# Section: NETWORK LATENCY
+# Reference: broker1 (all other nodes diffed against this)
+
+## broker1 vs broker2
+--- broker1
++++ broker2
+@@ -2,7 +2,7 @@
+ Hostname DNS lookup: 4 ms
+ 
+ --- TCP connect time to local service ports ---
+-localhost:9092 reachable (5 ms connect)
++localhost:9092 reachable (4 ms connect)
+ localhost:8083 NOT reachable
+ localhost:8081 NOT reachable
+ 
+
+## broker1 vs broker3
+--- broker1
++++ broker3
+@@ -1,8 +1,8 @@
+ --- DNS resolution time (local hostname) ---
+-Hostname DNS lookup: 4 ms
++Hostname DNS lookup: 3 ms
+ 
+ --- TCP connect time to local service ports ---
+-localhost:9092 reachable (5 ms connect)
++localhost:9092 reachable (4 ms connect)
+ localhost:8083 NOT reachable
+ localhost:8081 NOT reachable
+ 
+
+## broker1 vs connect
+--- broker1
++++ connect
+@@ -1,8 +1,8 @@
+ --- DNS resolution time (local hostname) ---
+-Hostname DNS lookup: 4 ms
++Hostname DNS lookup: 6 ms
+ 
+ --- TCP connect time to local service ports ---
+-localhost:9092 reachable (5 ms connect)
+-localhost:8083 NOT reachable
+-localhost:8081 NOT reachable
++localhost:9092 NOT reachable
++localhost:8083 reachable (4 ms connect)
++localhost:8081 reachable (5 ms connect)
+ 
+
+## broker1 vs monitor
+--- broker1
++++ monitor
+@@ -1,8 +1,8 @@
+ --- DNS resolution time (local hostname) ---
+-Hostname DNS lookup: 4 ms
++Hostname DNS lookup: 3 ms
+ 
+ --- TCP connect time to local service ports ---
+-localhost:9092 reachable (5 ms connect)
++localhost:9092 NOT reachable
+ localhost:8083 NOT reachable
+-localhost:8081 NOT reachable
++localhost:8081 reachable (4 ms connect)
+ 
+

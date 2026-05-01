@@ -1,0 +1,5 @@
+Under-replicated partitions: 0
+0
+Unavailable partitions     : 0
+0
+

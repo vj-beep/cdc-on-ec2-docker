@@ -1,0 +1,25 @@
+# Section: CPU AND MEMORY
+# Reference: broker1 (all other nodes diffed against this)
+
+## broker1 vs connect
+--- broker1
++++ connect
+@@ -1,5 +1,5 @@
+ --- vCPU count ---
+-16
++8
+ 
+ --- NUMA topology ---
+ (numactl not installed)
+
+## broker1 vs monitor
+--- broker1
++++ monitor
+@@ -1,5 +1,5 @@
+ --- vCPU count ---
+-16
++8
+ 
+ --- NUMA topology ---
+ (numactl not installed)
+

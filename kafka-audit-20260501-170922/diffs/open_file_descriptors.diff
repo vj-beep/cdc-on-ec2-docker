@@ -1,0 +1,36 @@
+# Section: OPEN FILE DESCRIPTORS
+# Reference: broker1 (all other nodes diffed against this)
+
+## broker1 vs broker3
+--- broker1
++++ broker3
+@@ -2,5 +2,5 @@
+ (No Kafka or Connect process found — is Docker running?)
+ 
+ --- System-wide FD usage (allocated / max allocated / system max) ---
+-5504	0	1000000
++5440	0	1000000
+ 
+
+## broker1 vs connect
+--- broker1
++++ connect
+@@ -2,5 +2,5 @@
+ (No Kafka or Connect process found — is Docker running?)
+ 
+ --- System-wide FD usage (allocated / max allocated / system max) ---
+-5504	0	1000000
++8448	0	1000000
+ 
+
+## broker1 vs monitor
+--- broker1
++++ monitor
+@@ -2,5 +2,5 @@
+ (No Kafka or Connect process found — is Docker running?)
+ 
+ --- System-wide FD usage (allocated / max allocated / system max) ---
+-5504	0	1000000
++4832	0	1000000
+ 
+

@@ -1,0 +1,20 @@
+--- CPU ---
+Architecture:                            x86_64
+CPU(s):                                  8
+Model name:                              Intel(R) Xeon(R) Platinum 8175M CPU @ 2.50GHz
+Thread(s) per core:                      2
+Core(s) per socket:                      4
+Socket(s):                               1
+NUMA node(s):                            1
+NUMA node0 CPU(s):                       0-7
+
+--- Memory ---
+               total        used        free      shared  buff/cache   available
+Mem:            30Gi        10Gi       5.0Gi       9.2Gi        14Gi        10Gi
+Swap:             0B          0B          0B
+
+--- Instance type (IMDSv2) ---
+m5.2xlarge
+--- Uptime ---
+ 17:09:55 up 2 days,  2:43,  0 users,  load average: 4.95, 4.46, 3.71
+
