@@ -276,7 +276,7 @@ echo -e "${BOLD}${BLUE}─ Step 3/7: Delete CDC Topics${NC}"
 
 ALL_TOPICS=$(run_on_broker "kafka-topics --bootstrap-server ${BOOTSTRAP} --list" 2>/dev/null | tr -d '\r' || echo "")
 
-CDC_TOPICS=$(echo "$ALL_TOPICS" | grep -E "^(sqlserver\.|aurora\.|_schema-history-|dlq-|connect-forward-|connect-reverse-|_confluent-metrics)" | sed 's/[[:space:]]*$//' | sort || true)
+CDC_TOPICS=$(echo "$ALL_TOPICS" | grep -E "^(sqlserver\.|aurora\.|_schema-history-|dlq-|connect-forward-|connect-reverse-)" | sed 's/[[:space:]]*$//' | sort || true)
 
 if [[ -z "$CDC_TOPICS" ]]; then
   echo -e "  ${GREY}○${NC} No CDC topics found"
