@@ -7,14 +7,15 @@ ARG PROXY_PORT=8080
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
-# Maven ignores HTTP_PROXY env vars — must use JVM system properties via MAVEN_OPTS.
-# PROXY_HOST drives the JVM flags (same pattern as the main stage's JAVA_TOOL_OPTIONS).
 ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY} \
-    http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} no_proxy=${NO_PROXY} \
-    MAVEN_OPTS=${PROXY_HOST:+"-Dhttp.proxyHost=${PROXY_HOST} -Dhttp.proxyPort=${PROXY_PORT} -Dhttps.proxyHost=${PROXY_HOST} -Dhttps.proxyPort=${PROXY_PORT}"}
+    http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} no_proxy=${NO_PROXY}
 COPY connect/smt /build
 WORKDIR /build
-RUN mvn -B package -DskipTests
+# Maven ignores HTTP_PROXY env vars — set JVM proxy flags via MAVEN_OPTS in the shell.
+# ENV ${VAR:+...} embeds literal quotes into the value and breaks Maven argument parsing.
+RUN if [ -n "$PROXY_HOST" ]; then \
+      export MAVEN_OPTS="-Dhttp.proxyHost=$PROXY_HOST -Dhttp.proxyPort=$PROXY_PORT -Dhttps.proxyHost=$PROXY_HOST -Dhttps.proxyPort=$PROXY_PORT"; \
+    fi && mvn -B package -DskipTests
 
 FROM confluentinc/cp-server-connect:${CP_VERSION}
 
