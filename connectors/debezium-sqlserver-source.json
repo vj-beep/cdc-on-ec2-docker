@@ -27,6 +27,7 @@
     "topic.creation.default.retention.ms": "${KAFKA_TOPIC_RETENTION_MS}",
 
     "snapshot.mode": "${SQLSERVER_SOURCE_SNAPSHOT_MODE}",
+    "snapshot.isolation.mode": "${SQLSERVER_SOURCE_SNAPSHOT_ISOLATION_MODE}",
     "snapshot.fetch.size": "${SQLSERVER_SOURCE_SNAPSHOT_FETCH_SIZE}",
 
     "key.converter": "io.confluent.connect.avro.AvroConverter",
