@@ -288,18 +288,16 @@ else
   echo -e "  Found ${TOPIC_COUNT} CDC-related topics:"
   echo ""
 
-  if $DRY_RUN; then
-    while IFS= read -r topic; do
-      topic=$(echo "$topic" | tr -d '\r' | xargs)
-      [[ -z "$topic" ]] && continue
+  while IFS= read -r topic; do
+    topic=$(echo "$topic" | tr -d '\r' | xargs)
+    [[ -z "$topic" ]] && continue
+    if $DRY_RUN; then
       echo -e "  ${YELLOW}~${NC} Would delete: ${topic}"
-    done <<< "$CDC_TOPICS"
-  else
-    # Delete all topics in a single kafka-topics call — one SSM round trip vs. one per topic.
-    TOPIC_ARGS=$(echo "$CDC_TOPICS" | tr -d '\r' | awk 'NF{printf "--topic %s ", $0}')
-    run_on_broker "kafka-topics --bootstrap-server ${BOOTSTRAP} --delete ${TOPIC_ARGS}" >/dev/null 2>&1
-    echo -e "  ${GREEN}●${NC} Deleted ${TOPIC_COUNT} topics (batched)"
-  fi
+    else
+      run_on_broker "kafka-topics --bootstrap-server ${BOOTSTRAP} --delete --topic ${topic}" >/dev/null 2>&1
+      echo -e "  ${GREEN}●${NC} Deleted: ${topic}"
+    fi
+  done <<< "$CDC_TOPICS"
 
   if ! $DRY_RUN; then
     echo ""
