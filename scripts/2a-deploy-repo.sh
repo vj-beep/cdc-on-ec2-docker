@@ -64,9 +64,21 @@ if [[ "${1:-}" == "--local" ]]; then
 
     which git >/dev/null 2>&1 || dnf install -y git
     mkdir -p "$deploy_home"
+    # Backup existing .env before wiping the repo directory
+    if [[ -f "$deploy_dir/.env" ]]; then
+        env_backup="${deploy_home}/.env.$(date +%Y%m%d_%H%M%S)"
+        cp "$deploy_dir/.env" "$env_backup"
+        echo "   📦 Backed up .env to $env_backup"
+    fi
     rm -rf "$deploy_dir" 2>/dev/null || true
     git clone "$repo_url" "$deploy_dir"
     chown -R "${deploy_user}:${deploy_user}" "$deploy_dir"
+    # Restore most recent .env backup
+    latest_backup=$(ls -t "${deploy_home}"/.env.* 2>/dev/null | head -1)
+    if [[ -n "$latest_backup" ]]; then
+        cp "$latest_backup" "$deploy_dir/.env"
+        echo "   ✅ Restored .env from $latest_backup"
+    fi
     ls -lh "$deploy_dir/docker-compose.yml"
     echo "✅ Repo cloned to $deploy_dir"
     echo ""
@@ -120,8 +132,19 @@ set -e
 export HTTP_PROXY='${HTTP_PROXY:-}' HTTPS_PROXY='${HTTPS_PROXY:-}' NO_PROXY='${NO_PROXY:-}'
 export http_proxy='${HTTP_PROXY:-}' https_proxy='${HTTPS_PROXY:-}' no_proxy='${NO_PROXY:-}'
 which git >/dev/null 2>&1 || sudo dnf install -y git
+deploy_home=\$(dirname ${DEPLOY_DIR})
+if [[ -f "${DEPLOY_DIR}/.env" ]]; then
+    env_backup="\${deploy_home}/.env.\$(date +%Y%m%d_%H%M%S)"
+    cp "${DEPLOY_DIR}/.env" "\$env_backup"
+    echo "   Backed up .env to \$env_backup"
+fi
 rm -rf ${DEPLOY_DIR} 2>/dev/null || true
 git clone ${repo_url} ${DEPLOY_DIR}
+latest_backup=\$(ls -t "\${deploy_home}"/.env.* 2>/dev/null | head -1)
+if [[ -n "\$latest_backup" ]]; then
+    cp "\$latest_backup" "${DEPLOY_DIR}/.env"
+    echo "   Restored .env from \$latest_backup"
+fi
 ls -lh ${DEPLOY_DIR}/docker-compose.yml
 REMOTE_EOF
 ) && {
@@ -149,10 +172,11 @@ REMOTE_EOF
                 $proxy,
                 "which git >/dev/null 2>&1 || dnf install -y git",
                 ("mkdir -p " + $deploy_home),
-                ("cd " + $deploy_home),
+                ("if [ -f " + $dir + "/.env ]; then cp " + $dir + "/.env " + $deploy_home + "/.env.$(date +%Y%m%d_%H%M%S) && echo Backed up .env; fi"),
                 ("rm -rf " + $dirname + " 2>/dev/null || true"),
                 ("git clone " + $repo + " " + $dirname),
                 ("chown -R " + $user + ":" + $user + " " + $dir),
+                ("latest=$(ls -t " + $deploy_home + "/.env.* 2>/dev/null | head -1) && [ -n \"$latest\" ] && cp \"$latest\" " + $dir + "/.env && echo Restored .env from $latest || true"),
                 ("ls -lh " + $dir + "/docker-compose.yml")
             ]}'
         )
