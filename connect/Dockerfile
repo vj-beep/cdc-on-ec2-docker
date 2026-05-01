@@ -1,4 +1,16 @@
 ARG CP_VERSION=8.0.0
+
+# Build stage: compile the StripNullBytes SMT jar
+FROM maven:3.9-eclipse-temurin-11 AS smt-builder
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY} \
+    http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} no_proxy=${NO_PROXY}
+COPY connect/smt /build
+WORKDIR /build
+RUN mvn -B -q package -DskipTests
+
 FROM confluentinc/cp-server-connect:${CP_VERSION}
 
 # Debezium 3.x required for CP 8.0.0 (kafka-clients 4.0 removed KafkaConsumer.poll(long)
@@ -49,3 +61,6 @@ ENV JAVA_TOOL_OPTIONS= \
 # Copy the Microsoft SQL Server JDBC driver (not bundled with Confluent or Debezium).
 # Download mssql-jdbc-12.4.2.jre11.jar from Microsoft and place it in connect/jars/ before building.
 COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
+
+# Copy the custom StripNullBytes SMT jar into the JDBC sink connector plugin dir
+COPY --from=smt-builder /build/target/strip-null-bytes-smt.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
