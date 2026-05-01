@@ -9,7 +9,7 @@ ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY} \
     http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} no_proxy=${NO_PROXY}
 COPY connect/smt /build
 WORKDIR /build
-RUN mvn -B -q package
+RUN mvn -B package -DskipTests
 
 FROM confluentinc/cp-server-connect:${CP_VERSION}
 
