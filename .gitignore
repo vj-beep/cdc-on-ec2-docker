@@ -20,6 +20,9 @@ monitoring/grafana/dashboards/aurora-to-sqlserver-cdc.json
 # Generated remediation scripts (customer-specific, contain hostnames)
 db-prep/remediation-*.sql
 
+# Kafka audit output directories
+kafka-audit*/
+
 # Docker & local artifacts
 .DS_Store
 *.log
