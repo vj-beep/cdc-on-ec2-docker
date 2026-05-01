@@ -21,9 +21,7 @@
     "value.converter": "io.confluent.connect.avro.AvroConverter",
     "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
 
-    "transforms": "stripNullBytes,unwrap,routeTopics",
-
-    "transforms.stripNullBytes.type": "com.cdc.smt.StripNullBytes",
+    "transforms": "unwrap,routeTopics",
 
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.drop.tombstones": "false",
