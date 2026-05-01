@@ -141,10 +141,9 @@ if [[ "${PROFILE}" == "snapshot" ]]; then
     warn "Switch to 'streaming' after the snapshot completes."
     echo ""
     echo -e "  ${BOLD}For a fresh snapshot (snapshot.mode=initial to take effect):${NC}"
-    echo "    1. Stop connectors:      ./scripts/ops-stop-all-connectors.sh -y"
-    echo "    2. Clear Kafka offsets:   ./scripts/teardown-reset-kafka.sh -y"
-    echo "    3. Switch profile:        (this step — already done)"
-    echo "    4. Redeploy connectors:   ./scripts/6-deploy-connectors.sh"
+    echo "    1. Clear Kafka offsets:   ./scripts/teardown-reset-kafka.sh -y"
+    echo "    2. Switch profile:        (this step — already done)"
+    echo "    3. Distribute .env:       ./scripts/2b-distribute-env.sh"
     echo ""
     echo -e "  ${BOLD}If offsets already exist, Debezium skips the snapshot — even with snapshot.mode=initial.${NC}"
     echo -e "  See docs/performance/profiles.md for the full runbook."
@@ -160,7 +159,7 @@ diff --color=always "${BACKUP}" "${ENV_FILE}" || true
 echo "--------------------------------------"
 echo ""
 
-echo -n -e "${BOLD}Distribute .env to all nodes and restart services? [y/N]:${NC} "
+echo -n -e "${BOLD}Distribute .env to all nodes and restart services? [y/N]: ${NC}"
 read -r CONFIRM
 
 if [[ "${CONFIRM}" =~ ^[Yy]$ ]]; then
@@ -264,14 +263,9 @@ if [[ "${CONFIRM}" =~ ^[Yy]$ ]]; then
     fi
 
     echo ""
-    warn "Connector configs are set at deploy time — worker restart alone is not enough."
     if [[ "${PROFILE}" == "snapshot" ]]; then
         warn "For a FRESH snapshot: clear offsets first with ./scripts/teardown-reset-kafka.sh"
-        warn "Then redeploy connectors:"
-    else
-        warn "Redeploy connectors now to apply new tuning to running connectors:"
     fi
-    echo "  ./scripts/6-deploy-connectors.sh"
 else
     echo ""
     info "Skipped. To apply manually:"
@@ -280,6 +274,4 @@ else
     echo "     SSM mode:  ./scripts/5-start-node.sh broker1 (dispatches via SSM)"
     echo "     SSH mode:  ssh into each node, then: bash scripts/5-start-node.sh --local broker1"
     echo "     Repeat for broker2, broker3, connect, monitor"
-    echo "  3. Redeploy connectors to apply new batch/queue sizes:"
-    echo "     ./scripts/6-deploy-connectors.sh"
 fi
