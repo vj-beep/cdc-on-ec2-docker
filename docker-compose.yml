@@ -176,6 +176,7 @@ services:
       # --- Consumer overrides (from tuning profile) ---
       CONNECT_CONSUMER_OVERRIDE_FETCH_MIN_BYTES: ${CONNECT_CONSUMER_FETCH_MIN_BYTES}
       CONNECT_CONSUMER_OVERRIDE_FETCH_MAX_WAIT_MS: ${CONNECT_CONSUMER_FETCH_MAX_WAIT_MS}
+      CONNECT_CONSUMER_OVERRIDE_MAX_POLL_INTERVAL_MS: ${CONNECT_CONSUMER_MAX_POLL_INTERVAL_MS:-300000}
 
       # --- Plugin path ---
       CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components,/etc/kafka-connect/jars
@@ -242,6 +243,7 @@ services:
       # --- Consumer overrides (from tuning profile) ---
       CONNECT_CONSUMER_OVERRIDE_FETCH_MIN_BYTES: ${CONNECT_CONSUMER_FETCH_MIN_BYTES}
       CONNECT_CONSUMER_OVERRIDE_FETCH_MAX_WAIT_MS: ${CONNECT_CONSUMER_FETCH_MAX_WAIT_MS}
+      CONNECT_CONSUMER_OVERRIDE_MAX_POLL_INTERVAL_MS: ${CONNECT_CONSUMER_MAX_POLL_INTERVAL_MS:-300000}
 
       # --- Plugin path ---
       CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components,/etc/kafka-connect/jars
