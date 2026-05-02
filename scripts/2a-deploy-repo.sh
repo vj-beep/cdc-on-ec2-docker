@@ -71,7 +71,8 @@ if [[ "${1:-}" == "--local" ]]; then
         echo "   📦 Backed up .env to $env_backup"
     fi
     rm -rf "$deploy_dir" 2>/dev/null || true
-    git clone "$repo_url" "$deploy_dir"
+    ref_args=(); [[ -n "${PUBLIC_REPO_TAG:-}" ]] && ref_args=(--branch "$PUBLIC_REPO_TAG" --depth 1)
+    git clone "${ref_args[@]}" "$repo_url" "$deploy_dir"
     chown -R "${deploy_user}:${deploy_user}" "$deploy_dir"
     # Restore most recent .env backup
     latest_backup=$(ls -t "${deploy_home}"/.env.* 2>/dev/null | head -1)
@@ -139,7 +140,8 @@ if [[ -f "${DEPLOY_DIR}/.env" ]]; then
     echo "   Backed up .env to \$env_backup"
 fi
 rm -rf ${DEPLOY_DIR} 2>/dev/null || true
-git clone ${repo_url} ${DEPLOY_DIR}
+ref_args=(); [[ -n "${PUBLIC_REPO_TAG:-}" ]] && ref_args=(--branch "${PUBLIC_REPO_TAG}" --depth 1)
+git clone "${ref_args[@]}" ${repo_url} ${DEPLOY_DIR}
 latest_backup=\$(ls -t "\${deploy_home}"/.env.* 2>/dev/null | head -1)
 if [[ -n "\$latest_backup" ]]; then
     cp "\$latest_backup" "${DEPLOY_DIR}/.env"
@@ -162,9 +164,12 @@ REMOTE_EOF
             proxy_cmd="export HTTP_PROXY='${HTTP_PROXY}' HTTPS_PROXY='${HTTPS_PROXY}' NO_PROXY='${NO_PROXY}' http_proxy='${HTTP_PROXY}' https_proxy='${HTTPS_PROXY}' no_proxy='${NO_PROXY}'"
         fi
         local cmd_json
+        local ref_flag=""
+        [[ -n "${PUBLIC_REPO_TAG:-}" ]] && ref_flag="--branch ${PUBLIC_REPO_TAG} --depth 1"
         cmd_json=$(jq -n --arg proxy "$proxy_cmd" \
             --arg deploy_home "$(dirname "$DEPLOY_DIR")" \
             --arg repo "$repo_url" \
+            --arg ref_flag "$ref_flag" \
             --arg user "$DEPLOY_USER" \
             --arg dir "$DEPLOY_DIR" \
             '{commands: [
@@ -173,7 +178,7 @@ REMOTE_EOF
                 ("mkdir -p " + $deploy_home),
                 ("if [ -f " + $dir + "/.env ]; then cp " + $dir + "/.env " + $deploy_home + "/.env.$(date +%Y%m%d_%H%M%S) && echo Backed up .env; fi"),
                 ("rm -rf " + $dir + " 2>/dev/null || true"),
-                ("git clone " + $repo + " " + $dir),
+                ("git clone " + $ref_flag + (if $ref_flag != "" then " " else "" end) + $repo + " " + $dir),
                 ("chown -R " + $user + ":" + $user + " " + $dir),
                 ("latest=$(ls -t " + $deploy_home + "/.env.* 2>/dev/null | head -1) && [ -n \"$latest\" ] && cp \"$latest\" " + $dir + "/.env && echo Restored .env from $latest || true"),
                 ("ls -lh " + $dir + "/docker-compose.yml")
