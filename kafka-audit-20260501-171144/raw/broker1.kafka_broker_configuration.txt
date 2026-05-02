@@ -1,3 +1,0 @@
---- Tuning vars from broker container env ---
-(Docker inspect failed — broker may not be running)
-

@@ -1,6 +1,0 @@
---- Kafka/Connect process FD count vs limit ---
-(No Kafka or Connect process found — is Docker running?)
-
---- System-wide FD usage (allocated / max allocated / system max) ---
-5600	0	1000000
-

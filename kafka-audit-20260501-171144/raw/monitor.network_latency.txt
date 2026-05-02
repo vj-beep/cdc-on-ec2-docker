@@ -1,8 +1,0 @@
---- DNS resolution time (local hostname) ---
-Hostname DNS lookup: 3 ms
-
---- TCP connect time to local service ports ---
-localhost:9092 NOT reachable
-localhost:8083 NOT reachable
-localhost:8081 reachable (4 ms connect)
-

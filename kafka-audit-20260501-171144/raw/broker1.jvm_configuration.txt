@@ -1,9 +1,0 @@
---- JVM flags from running process ---
-(process not found — reading from Docker container env)
-(Docker inspect failed — broker may not be running)
-
---- Java version ---
-scripts/ops-latency-audit.sh: line 454: java: command not found
-Error response from daemon: No such container: broker
-(java not in PATH)
-
