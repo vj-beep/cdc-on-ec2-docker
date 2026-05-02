@@ -164,7 +164,6 @@ REMOTE_EOF
         local cmd_json
         cmd_json=$(jq -n --arg proxy "$proxy_cmd" \
             --arg deploy_home "$(dirname "$DEPLOY_DIR")" \
-            --arg dirname "$(basename "$DEPLOY_DIR")" \
             --arg repo "$repo_url" \
             --arg user "$DEPLOY_USER" \
             --arg dir "$DEPLOY_DIR" \
@@ -173,8 +172,8 @@ REMOTE_EOF
                 "which git >/dev/null 2>&1 || dnf install -y git",
                 ("mkdir -p " + $deploy_home),
                 ("if [ -f " + $dir + "/.env ]; then cp " + $dir + "/.env " + $deploy_home + "/.env.$(date +%Y%m%d_%H%M%S) && echo Backed up .env; fi"),
-                ("rm -rf " + $dirname + " 2>/dev/null || true"),
-                ("git clone " + $repo + " " + $dirname),
+                ("rm -rf " + $dir + " 2>/dev/null || true"),
+                ("git clone " + $repo + " " + $dir),
                 ("chown -R " + $user + ":" + $user + " " + $dir),
                 ("latest=$(ls -t " + $deploy_home + "/.env.* 2>/dev/null | head -1) && [ -n \"$latest\" ] && cp \"$latest\" " + $dir + "/.env && echo Restored .env from $latest || true"),
                 ("ls -lh " + $dir + "/docker-compose.yml")
