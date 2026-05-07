@@ -326,7 +326,7 @@ output_human() {
   IFS=',' read -r vcpu ram storage <<<"$specs"
   printf "%-25s %-15s %-8s %-8s %-12s\n" "monitor-1" "$m" "$vcpu" "$ram" "$storage"
 
-  echo -e "\n${GREEN}Tuning Recommendations${NC}"
+  echo -e "\n${GREEN}General Tuning Recommendations${NC}"
   echo ""
   get_tuning_advice "broker" "$b1"
   echo ""
