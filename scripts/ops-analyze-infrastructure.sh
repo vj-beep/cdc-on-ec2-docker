@@ -11,6 +11,8 @@
 # Usage:
 #   ./scripts/ops-analyze-infrastructure.sh
 #   ./scripts/ops-analyze-infrastructure.sh --json
+#   ./scripts/ops-analyze-infrastructure.sh --metrics
+#   ./scripts/ops-analyze-infrastructure.sh --metrics --duration 300
 #
 # Prerequisites:
 #   - .env file with EC2 Instance IDs (already in EC2 Instance IDs section):
@@ -34,10 +36,14 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 OUTPUT_FORMAT="human"
+COLLECT_METRICS=false
+METRICS_DURATION=60
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --json) OUTPUT_FORMAT="json"; shift ;;
+    --metrics) COLLECT_METRICS=true; shift ;;
+    --duration) METRICS_DURATION="$2"; shift 2 ;;
     *) echo "Unknown flag: $1"; exit 1 ;;
   esac
 done
@@ -378,6 +384,55 @@ output_json() {
 EOF
 }
 
+collect_node_metrics() {
+  local instance_id=$1
+  local node_name=$2
+  local region="${AWS_REGION:-us-east-1}"
+
+  echo "[*] Collecting metrics from $node_name..." >&2
+
+  aws ssm send-command \
+    --instance-ids "$instance_id" \
+    --document-name "AWS-RunShellScript" \
+    --region "$region" \
+    --parameters 'commands=[
+      "echo \"timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)\"",
+      "echo \"node='$node_name'\"",
+      "echo \"cpu_usage=$(top -bn1 | grep Cpu | sed \"s/.*, *\\([0-9.]*\\)%* id.*/\\1/\" | awk \"{print 100 - \\$1}\")\"",
+      "echo \"mem_usage=$(free | grep Mem | awk \"{printf \\\"%.1f\\\", 100 * \\$3 / \\$2}\")\"",
+      "echo \"disk_usage=$(df /data/kafka 2>/dev/null | tail -1 | awk \\\"{print \\$5}\\\" || echo \\\"N/A\\\")\"",
+      "docker stats --no-stream --format \\\"{{.Container}},{{.CPUPerc}},{{.MemUsage}}\\\" 2>/dev/null | head -3 || echo \\\"docker unavailable\\\""
+    ]' \
+    --output json 2>/dev/null | jq -r '.Command.CommandId' 2>/dev/null || true
+}
+
+display_metrics() {
+  echo -e "\n${YELLOW}Collecting live metrics from all nodes (30 seconds)...${NC}\n"
+
+  local cmd_id_broker_1=$(collect_node_metrics "${BROKER_1_INSTANCE_ID}" "broker-1")
+  local cmd_id_connect=$(collect_node_metrics "${CONNECT_1_INSTANCE_ID}" "connect-1")
+  local cmd_id_monitor=$(collect_node_metrics "${MONITOR_1_INSTANCE_ID}" "monitor-1")
+
+  sleep 3
+
+  if [[ -n "$cmd_id_broker_1" ]]; then
+    echo -e "${GREEN}broker-1 metrics:${NC}"
+    aws ssm get-command-invocation --command-id "$cmd_id_broker_1" --instance-id "${BROKER_1_INSTANCE_ID}" --region "${AWS_REGION:-us-east-1}" --query 'StandardOutputContent' --output text 2>/dev/null | grep -E "cpu_usage|mem_usage|disk_usage" | sed 's/^/  /' || true
+  fi
+
+  if [[ -n "$cmd_id_connect" ]]; then
+    echo -e "${GREEN}connect-1 metrics:${NC}"
+    aws ssm get-command-invocation --command-id "$cmd_id_connect" --instance-id "${CONNECT_1_INSTANCE_ID}" --region "${AWS_REGION:-us-east-1}" --query 'StandardOutputContent' --output text 2>/dev/null | grep -E "cpu_usage|mem_usage|disk_usage" | sed 's/^/  /' || true
+  fi
+
+  if [[ -n "$cmd_id_monitor" ]]; then
+    echo -e "${GREEN}monitor-1 metrics:${NC}"
+    aws ssm get-command-invocation --command-id "$cmd_id_monitor" --instance-id "${MONITOR_1_INSTANCE_ID}" --region "${AWS_REGION:-us-east-1}" --query 'StandardOutputContent' --output text 2>/dev/null | grep -E "cpu_usage|mem_usage|disk_usage" | sed 's/^/  /' || true
+  fi
+
+  echo ""
+}
+
 if [[ -z "${BROKER_1_INSTANCE_ID:-}" ]] || [[ -z "${CONNECT_1_INSTANCE_ID:-}" ]] || [[ -z "${MONITOR_1_INSTANCE_ID:-}" ]]; then
   echo -e "${RED}Error: Instance IDs not configured in .env${NC}"
   echo ""
@@ -406,3 +461,7 @@ case $OUTPUT_FORMAT in
   human) output_human "$b1" "$b2" "$b3" "$c" "$m" ;;
   json) output_json "$b1" "$b2" "$b3" "$c" "$m" ;;
 esac
+
+if [[ "$COLLECT_METRICS" == "true" ]]; then
+  display_metrics
+fi
