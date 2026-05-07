@@ -51,22 +51,195 @@ source .env
 
 get_instance_specs() {
   local type=$1
+
+  # Exact matches (CDC-typical sizes)
   case $type in
+    # i3 series (NVMe) — Kafka brokers
+    i3.large) echo "2,16,NVMe" ;;
+    i3.xlarge) echo "4,31,NVMe" ;;
     i3.2xlarge) echo "8,61,NVMe" ;;
     i3.4xlarge) echo "16,122,NVMe" ;;
     i3.8xlarge) echo "32,244,NVMe" ;;
+    i3.16xlarge) echo "64,488,NVMe" ;;
+
+    # i4i series (newer NVMe)
+    i4i.large) echo "2,16,NVMe" ;;
+    i4i.xlarge) echo "4,32,NVMe" ;;
+    i4i.2xlarge) echo "8,64,NVMe" ;;
+    i4i.4xlarge) echo "16,128,NVMe" ;;
+    i4i.8xlarge) echo "32,256,NVMe" ;;
+
+    # m5 series (EBS) — Connect, monitoring
     m5.large) echo "2,8,EBS" ;;
     m5.xlarge) echo "4,16,EBS" ;;
     m5.2xlarge) echo "8,32,EBS" ;;
     m5.4xlarge) echo "16,64,EBS" ;;
+    m5.8xlarge) echo "32,128,EBS" ;;
+    m5.12xlarge) echo "48,192,EBS" ;;
+    m5.24xlarge) echo "96,384,EBS" ;;
+
+    # m5d series (NVMe+EBS)
     m5d.large) echo "2,8,NVMe+EBS" ;;
     m5d.xlarge) echo "4,16,NVMe+EBS" ;;
     m5d.2xlarge) echo "8,32,NVMe+EBS" ;;
     m5d.4xlarge) echo "16,64,NVMe+EBS" ;;
+    m5d.8xlarge) echo "32,128,NVMe+EBS" ;;
+    m5d.12xlarge) echo "48,192,NVMe+EBS" ;;
+    m5d.24xlarge) echo "96,384,NVMe+EBS" ;;
+
+    # m6i series (newer Intel)
+    m6i.large) echo "2,8,EBS" ;;
+    m6i.xlarge) echo "4,16,EBS" ;;
+    m6i.2xlarge) echo "8,32,EBS" ;;
+    m6i.4xlarge) echo "16,64,EBS" ;;
+    m6i.8xlarge) echo "32,128,EBS" ;;
+
+    # m6g series (Graviton2)
+    m6g.large) echo "2,8,EBS" ;;
+    m6g.xlarge) echo "4,16,EBS" ;;
+    m6g.2xlarge) echo "8,32,EBS" ;;
+    m6g.4xlarge) echo "16,64,EBS" ;;
+
+    # m7i series (latest Intel)
+    m7i.large) echo "2,8,EBS" ;;
+    m7i.xlarge) echo "4,16,EBS" ;;
+    m7i.2xlarge) echo "8,32,EBS" ;;
+    m7i.4xlarge) echo "16,64,EBS" ;;
+
+    # m7g series (latest Graviton)
+    m7g.large) echo "2,8,EBS" ;;
+    m7g.xlarge) echo "4,16,EBS" ;;
+    m7g.2xlarge) echo "8,32,EBS" ;;
+    m7g.4xlarge) echo "16,64,EBS" ;;
+
+    # r6i series (memory-optimized Intel)
+    r6i.large) echo "2,16,EBS" ;;
+    r6i.xlarge) echo "4,32,EBS" ;;
     r6i.2xlarge) echo "8,64,EBS" ;;
+    r6i.4xlarge) echo "16,128,EBS" ;;
+    r6i.8xlarge) echo "32,256,EBS" ;;
+
+    # r6g series (memory-optimized Graviton2)
+    r6g.large) echo "2,16,EBS" ;;
+    r6g.xlarge) echo "4,32,EBS" ;;
     r6g.2xlarge) echo "8,64,EBS" ;;
+    r6g.4xlarge) echo "16,128,EBS" ;;
+
+    # r7i series (memory-optimized Intel)
+    r7i.large) echo "2,16,EBS" ;;
+    r7i.xlarge) echo "4,32,EBS" ;;
+    r7i.2xlarge) echo "8,64,EBS" ;;
+    r7i.4xlarge) echo "16,128,EBS" ;;
+
+    # r7g series (memory-optimized Graviton)
+    r7g.large) echo "2,16,EBS" ;;
+    r7g.xlarge) echo "4,32,EBS" ;;
+    r7g.2xlarge) echo "8,64,EBS" ;;
+    r7g.4xlarge) echo "16,128,EBS" ;;
+
+    # c6i series (compute-optimized Intel)
+    c6i.large) echo "2,4,EBS" ;;
+    c6i.xlarge) echo "4,8,EBS" ;;
+    c6i.2xlarge) echo "8,16,EBS" ;;
     c6i.4xlarge) echo "16,32,EBS" ;;
-    *) echo "unknown,unknown,unknown" ;;
+    c6i.8xlarge) echo "32,64,EBS" ;;
+
+    # c6g series (compute-optimized Graviton2)
+    c6g.large) echo "2,4,EBS" ;;
+    c6g.xlarge) echo "4,8,EBS" ;;
+    c6g.2xlarge) echo "8,16,EBS" ;;
+    c6g.4xlarge) echo "16,32,EBS" ;;
+
+    # c7i series (compute-optimized Intel)
+    c7i.large) echo "2,4,EBS" ;;
+    c7i.xlarge) echo "4,8,EBS" ;;
+    c7i.2xlarge) echo "8,16,EBS" ;;
+    c7i.4xlarge) echo "16,32,EBS" ;;
+
+    # c7g series (compute-optimized Graviton)
+    c7g.large) echo "2,4,EBS" ;;
+    c7g.xlarge) echo "4,8,EBS" ;;
+    c7g.2xlarge) echo "8,16,EBS" ;;
+    c7g.4xlarge) echo "16,32,EBS" ;;
+
+    # Fallback: derive from size pattern
+    *)
+      local size="${type##*.}"  # Extract size (e.g., "2xlarge" from "m5.2xlarge")
+      local family="${type%%.*}" # Extract family (e.g., "m5" from "m5.2xlarge")
+
+      # Family-based specs (vCPU, RAM pattern)
+      case "$family" in
+        i3*|i4*) echo "$(derive_nvme_specs "$size")NVMe" ;;
+        m5*|m6*|m7*) echo "$(derive_general_specs "$size")EBS" ;;
+        m5d*|m6d*|m7d*) echo "$(derive_general_specs "$size")NVMe+EBS" ;;
+        r6*|r7*) echo "$(derive_memory_specs "$size")EBS" ;;
+        c6*|c7*) echo "$(derive_compute_specs "$size")EBS" ;;
+        t3*|t4*) echo "$(derive_general_specs "$size")EBS" ;;
+        *) echo "unknown,unknown,unknown" ;;
+      esac
+      ;;
+  esac
+}
+
+# Derive specs for NVMe instance families (i3, i4)
+derive_nvme_specs() {
+  local size=$1
+  case "$size" in
+    large) echo "2,16," ;;
+    xlarge) echo "4,31," ;;
+    2xlarge) echo "8,61," ;;
+    4xlarge) echo "16,122," ;;
+    8xlarge) echo "32,244," ;;
+    16xlarge) echo "64,488," ;;
+    *) echo "unknown,unknown," ;;
+  esac
+}
+
+# Derive specs for general purpose (m5, m6, m7)
+derive_general_specs() {
+  local size=$1
+  case "$size" in
+    large) echo "2,8," ;;
+    xlarge) echo "4,16," ;;
+    2xlarge) echo "8,32," ;;
+    4xlarge) echo "16,64," ;;
+    8xlarge) echo "32,128," ;;
+    12xlarge) echo "48,192," ;;
+    16xlarge) echo "64,256," ;;
+    24xlarge) echo "96,384," ;;
+    *) echo "unknown,unknown," ;;
+  esac
+}
+
+# Derive specs for memory-optimized (r6, r7)
+derive_memory_specs() {
+  local size=$1
+  case "$size" in
+    large) echo "2,16," ;;
+    xlarge) echo "4,32," ;;
+    2xlarge) echo "8,64," ;;
+    4xlarge) echo "16,128," ;;
+    8xlarge) echo "32,256," ;;
+    12xlarge) echo "48,384," ;;
+    16xlarge) echo "64,512," ;;
+    *) echo "unknown,unknown," ;;
+  esac
+}
+
+# Derive specs for compute-optimized (c6, c7)
+derive_compute_specs() {
+  local size=$1
+  case "$size" in
+    large) echo "2,4," ;;
+    xlarge) echo "4,8," ;;
+    2xlarge) echo "8,16," ;;
+    4xlarge) echo "16,32," ;;
+    8xlarge) echo "32,64," ;;
+    9xlarge) echo "36,72," ;;
+    12xlarge) echo "48,96," ;;
+    18xlarge) echo "72,144," ;;
+    24xlarge) echo "96,192," ;;
+    *) echo "unknown,unknown," ;;
   esac
 }
 
