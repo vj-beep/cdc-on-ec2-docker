@@ -400,7 +400,9 @@ collect_node_metrics() {
       "echo \"node='$node_name'\"",
       "echo \"cpu_usage=$(top -bn1 | grep Cpu | sed \"s/.*, *\\([0-9.]*\\)%* id.*/\\1/\" | awk \"{print 100 - \\$1}\")\"",
       "echo \"mem_usage=$(free | grep Mem | awk \"{printf \\\"%.1f\\\", 100 * \\$3 / \\$2}\")\"",
-      "echo \"disk_usage=$(df /data/kafka 2>/dev/null | tail -1 | awk \\\"{print \\$5}\\\" || echo \\\"N/A\\\")\"",
+      "echo \"disk_util=$(iostat -x 1 2 2>/dev/null | tail -1 | awk \"{print \\$NF}\" || echo \\\"N/A\\\")\"",
+      "echo \"disk_usage=$(df -h /data/kafka 2>/dev/null | tail -1 | awk \"{print \\$5}\" || df -h / 2>/dev/null | tail -1 | awk \"{print \\$5}\" || echo \\\"N/A\\\")\"",
+      "if [[ -f /var/log/kafka/server.log ]]; then echo \\\"gc_pause_ms=$(grep -oP \\\"\\[GC pause \\K[0-9.]+\\\" /var/log/kafka/server.log | tail -1 || echo \\\"N/A\\\")\\\"; else echo \\\"gc_pause_ms=N/A\\\"; fi",
       "docker stats --no-stream --format \\\"{{.Container}},{{.CPUPerc}},{{.MemUsage}}\\\" 2>/dev/null | head -3 || echo \\\"docker unavailable\\\""
     ]' \
     --output json 2>/dev/null | jq -r '.Command.CommandId' 2>/dev/null || true
