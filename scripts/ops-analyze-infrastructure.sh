@@ -262,50 +262,6 @@ fetch_instance_type() {
     --output text 2>/dev/null || echo "unknown"
 }
 
-get_tuning_advice() {
-  local role=$1 type=$2
-
-  case $role in
-    broker)
-      cat <<'EOF'
-
-Broker Tuning (i3.4xlarge):
-  • num.network.threads=12 (handle parallel connections)
-  • num.io.threads=12 (match vCPU for I/O throughput)
-  • replica.socket.send.buffer.bytes=102400 (100 KB)
-  • replica.socket.receive.buffer.bytes=102400
-  • num.replica.fetchers=4 (parallel replication)
-  • compression.type=snappy (CPU-efficient, 3-4x compression)
-  • JVM heap: 12-16 GB (60% of available RAM)
-  • Monitor: CPU <80%, Memory <85%, Disk I/O <50%
-EOF
-      ;;
-    connect)
-      cat <<'EOF'
-
-Connect Tuning (m5.2xlarge):
-  • tasks.max=2 (one forward, one reverse CDC)
-  • JDBC sink batch.size=50-100 (lower for Aurora, higher for stable networks)
-  • Debezium source batch.size=100-1000 (snapshot: 1000, streaming: 100)
-  • source poll.interval.ms=100 (streaming), 500 (snapshot)
-  • JVM heap: 3-4 GB per task (total 6-8 GB for 2 tasks)
-  • Consumer fetch.min.bytes=1 (streaming profile)
-  • Monitor: CPU <80%, Memory <85%, connector lag <60s
-EOF
-      ;;
-    monitor)
-      cat <<'EOF'
-
-Monitoring Tuning (m5d.2xlarge):
-  • Grafana: ensure 4-6 GB RAM available
-  • Prometheus: retention 24-72 hours (trade-off storage vs history)
-  • ksqlDB heap: 4-8 GB (if running aggregations)
-  • JVM defaults acceptable unless high metric volume
-EOF
-      ;;
-  esac
-}
-
 output_human() {
   local b1=$1 b2=$2 b3=$3 c=$4 m=$5
 
@@ -332,14 +288,6 @@ output_human() {
   IFS=',' read -r vcpu ram storage <<<"$specs"
   printf "%-25s %-15s %-8s %-8s %-12s\n" "monitor-1" "$m" "$vcpu" "$ram" "$storage"
 
-  echo -e "\n${GREEN}General Tuning Recommendations${NC}"
-  echo ""
-  get_tuning_advice "broker" "$b1"
-  echo ""
-  get_tuning_advice "connect" "$c"
-  echo ""
-  get_tuning_advice "monitor" "$m"
-
   echo -e "\n${YELLOW}Key Metrics to Monitor${NC}\n"
   cat <<'METRICS'
 Metric              Green       Yellow      Red         Action
@@ -352,10 +300,10 @@ GC Pause Time       <100ms      100-500ms   >1s         Tune heap, batches
 METRICS
 
   echo -e "\n${GREEN}Next Steps:${NC}"
-  echo "1. Review tuning recommendations above"
-  echo "2. Edit .env with recommended settings"
-  echo "3. Redeploy: ./scripts/6-deploy-connectors.sh"
-  echo "4. For detailed guidance: cat docs/INFRASTRUCTURE-TUNING-GUIDE.md"
+  echo "1. Review metrics above for your hardware"
+  echo "2. For tuning guidance: cat docs/INFRASTRUCTURE-TUNING-GUIDE.md"
+  echo "3. Edit .env with recommended settings"
+  echo "4. Redeploy: ./scripts/6-deploy-connectors.sh"
   echo ""
 }
 
