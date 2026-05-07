@@ -410,24 +410,55 @@ display_metrics() {
   echo -e "\n${YELLOW}Collecting live metrics from all nodes (30 seconds)...${NC}\n"
 
   local cmd_id_broker_1=$(collect_node_metrics "${BROKER_1_INSTANCE_ID}" "broker-1")
+  local cmd_id_broker_2=$(collect_node_metrics "${BROKER_2_INSTANCE_ID:-}" "broker-2")
+  local cmd_id_broker_3=$(collect_node_metrics "${BROKER_3_INSTANCE_ID:-}" "broker-3")
   local cmd_id_connect=$(collect_node_metrics "${CONNECT_1_INSTANCE_ID}" "connect-1")
   local cmd_id_monitor=$(collect_node_metrics "${MONITOR_1_INSTANCE_ID}" "monitor-1")
 
   sleep 3
 
+  # Helper to display metrics for a node
+  display_node_metrics() {
+    local cmd_id=$1
+    local instance_id=$2
+    local region="${AWS_REGION:-us-east-1}"
+
+    if [[ -z "$cmd_id" ]]; then
+      return
+    fi
+
+    local output=$(aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$instance_id" --region "$region" --query 'StandardOutputContent' --output text 2>/dev/null)
+
+    if [[ -z "$output" ]]; then
+      return
+    fi
+
+    echo "$output" | sed 's/^/  /'
+  }
+
   if [[ -n "$cmd_id_broker_1" ]]; then
     echo -e "${GREEN}broker-1 metrics:${NC}"
-    aws ssm get-command-invocation --command-id "$cmd_id_broker_1" --instance-id "${BROKER_1_INSTANCE_ID}" --region "${AWS_REGION:-us-east-1}" --query 'StandardOutputContent' --output text 2>/dev/null | grep -E "cpu_usage|mem_usage|disk_usage" | sed 's/^/  /' || true
+    display_node_metrics "$cmd_id_broker_1" "${BROKER_1_INSTANCE_ID}"
+  fi
+
+  if [[ -n "$cmd_id_broker_2" ]]; then
+    echo -e "${GREEN}broker-2 metrics:${NC}"
+    display_node_metrics "$cmd_id_broker_2" "${BROKER_2_INSTANCE_ID}"
+  fi
+
+  if [[ -n "$cmd_id_broker_3" ]]; then
+    echo -e "${GREEN}broker-3 metrics:${NC}"
+    display_node_metrics "$cmd_id_broker_3" "${BROKER_3_INSTANCE_ID}"
   fi
 
   if [[ -n "$cmd_id_connect" ]]; then
     echo -e "${GREEN}connect-1 metrics:${NC}"
-    aws ssm get-command-invocation --command-id "$cmd_id_connect" --instance-id "${CONNECT_1_INSTANCE_ID}" --region "${AWS_REGION:-us-east-1}" --query 'StandardOutputContent' --output text 2>/dev/null | grep -E "cpu_usage|mem_usage|disk_usage" | sed 's/^/  /' || true
+    display_node_metrics "$cmd_id_connect" "${CONNECT_1_INSTANCE_ID}"
   fi
 
   if [[ -n "$cmd_id_monitor" ]]; then
     echo -e "${GREEN}monitor-1 metrics:${NC}"
-    aws ssm get-command-invocation --command-id "$cmd_id_monitor" --instance-id "${MONITOR_1_INSTANCE_ID}" --region "${AWS_REGION:-us-east-1}" --query 'StandardOutputContent' --output text 2>/dev/null | grep -E "cpu_usage|mem_usage|disk_usage" | sed 's/^/  /' || true
+    display_node_metrics "$cmd_id_monitor" "${MONITOR_1_INSTANCE_ID}"
   fi
 
   echo ""
