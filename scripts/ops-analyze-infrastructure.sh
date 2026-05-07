@@ -299,11 +299,6 @@ Disk I/O (util)     <20%        20-50%      >80%        Add NVMe storage
 GC Pause Time       <100ms      100-500ms   >1s         Tune heap, batches
 METRICS
 
-  echo -e "\n${GREEN}Next Steps:${NC}"
-  echo "1. Review metrics above for your hardware"
-  echo "2. For tuning guidance: cat docs/INFRASTRUCTURE-TUNING-GUIDE.md"
-  echo "3. Edit .env with recommended settings"
-  echo "4. Redeploy: ./scripts/6-deploy-connectors.sh"
   echo ""
 }
 
