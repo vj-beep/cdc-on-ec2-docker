@@ -39,6 +39,8 @@
     "max.batch.size": "${SQLSERVER_SOURCE_MAX_BATCH_SIZE}",
     "max.queue.size": "${SQLSERVER_SOURCE_MAX_QUEUE_SIZE}",
     "max.queue.size.in.bytes": "${SQLSERVER_SOURCE_MAX_QUEUE_SIZE_IN_BYTES}",
+    "query.fetch.size": "${SQLSERVER_SOURCE_QUERY_FETCH_SIZE}",
+    "heartbeat.interval.ms": "${SQLSERVER_SOURCE_HEARTBEAT_INTERVAL_MS}",
 
     "producer.override.linger.ms": "1",
     "producer.override.max.request.size": "${CONNECT_PRODUCER_MAX_REQUEST_SIZE}",
