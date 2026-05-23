@@ -21,7 +21,7 @@
     "value.converter": "io.confluent.connect.avro.AvroConverter",
     "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
 
-    "transforms": "unwrap,routeTopics,keyCase",
+    "transforms": "unwrap,routeTopics,keyCase,valueCase",
 
     "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
     "transforms.unwrap.drop.tombstones": "false",
@@ -32,8 +32,12 @@
     "transforms.routeTopics.replacement": "$1",
 
     "transforms.keyCase.type": "com.github.jcustenborder.kafka.connect.transform.common.ChangeCase$Key",
-    "transforms.keyCase.from": "UPPER_CAMEL",
+    "transforms.keyCase.from": "LOWER_CAMEL",
     "transforms.keyCase.to": "LOWER_UNDERSCORE",
+
+    "transforms.valueCase.type": "com.github.jcustenborder.kafka.connect.transform.common.ChangeCase$Value",
+    "transforms.valueCase.from": "LOWER_CAMEL",
+    "transforms.valueCase.to": "LOWER_UNDERSCORE",
 
     "consumer.override.fetch.max.wait.ms": "10",
     "consumer.override.fetch.min.bytes": "1",

@@ -33,7 +33,7 @@
 
     "transforms.keyCase.type": "com.github.jcustenborder.kafka.connect.transform.common.ChangeCase$Key",
     "transforms.keyCase.from": "LOWER_UNDERSCORE",
-    "transforms.keyCase.to": "UPPER_CAMEL",
+    "transforms.keyCase.to": "LOWER_CAMEL",
 
     "consumer.override.fetch.max.wait.ms": "10",
     "consumer.override.fetch.min.bytes": "1",
