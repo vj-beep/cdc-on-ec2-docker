@@ -42,6 +42,16 @@
     "producer.override.linger.ms": "0",
     "producer.override.max.request.size": "${CONNECT_PRODUCER_MAX_REQUEST_SIZE}",
 
+    "transforms": "topicCase,valueCase",
+
+    "transforms.topicCase.type": "com.github.jcustenborder.kafka.connect.transform.common.ChangeTopicCase",
+    "transforms.topicCase.from": "LOWER_UNDERSCORE",
+    "transforms.topicCase.to": "UPPER_CAMEL",
+
+    "transforms.valueCase.type": "com.github.jcustenborder.kafka.connect.transform.common.ChangeCase$Value",
+    "transforms.valueCase.from": "LOWER_UNDERSCORE",
+    "transforms.valueCase.to": "UPPER_CAMEL",
+
     "errors.tolerance": "all",
     "errors.log.enable": "true",
     "errors.log.include.messages": "true"
