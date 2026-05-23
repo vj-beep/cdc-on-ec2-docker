@@ -46,11 +46,11 @@
 
     "transforms.topicCase.type": "com.github.jcustenborder.kafka.connect.transform.common.ChangeTopicCase",
     "transforms.topicCase.from": "LOWER_UNDERSCORE",
-    "transforms.topicCase.to": "UPPER_CAMEL",
+    "transforms.topicCase.to": "LOWER_CAMEL",
 
     "transforms.valueCase.type": "com.github.jcustenborder.kafka.connect.transform.common.ChangeCase$Value",
     "transforms.valueCase.from": "LOWER_UNDERSCORE",
-    "transforms.valueCase.to": "UPPER_CAMEL",
+    "transforms.valueCase.to": "LOWER_CAMEL",
 
     "errors.tolerance": "all",
     "errors.log.enable": "true",
