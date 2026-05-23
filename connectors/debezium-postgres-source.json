@@ -42,7 +42,12 @@
     "producer.override.linger.ms": "0",
     "producer.override.max.request.size": "${CONNECT_PRODUCER_MAX_REQUEST_SIZE}",
 
-    "transforms": "topicCase,valueCase",
+    "transforms": "unwrap,topicCase,valueCase",
+
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    "transforms.unwrap.add.headers": "op",
 
     "transforms.topicCase.type": "com.github.jcustenborder.kafka.connect.transform.common.ChangeTopicCase",
     "transforms.topicCase.from": "LOWER_UNDERSCORE",
