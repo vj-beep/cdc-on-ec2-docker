@@ -2,6 +2,41 @@
 
 Expected startup durations for each service after `docker compose up -d`. These are normal — do not restart containers before the listed ready time.
 
+## Pre-Startup Checklist
+
+**Before starting CDC pipeline, verify these critical services are ready:**
+
+### SQL Server Agent (Critical)
+
+SQL Server Agent must be running — it processes CDC capture jobs. If stopped, CDC changes are never captured, and Debezium will fail with "LSN no longer available".
+
+**Check status via SSM:**
+```powershell
+Get-Service SQLSERVERAGENT | Select-Object Status
+```
+
+**If stopped, start it:**
+```powershell
+Start-Service SQLSERVERAGENT -Force
+```
+
+Verify it stays running for at least 30 seconds before proceeding. If it restarts or stops unexpectedly, investigate the Windows Event Log on the SQL Server instance.
+
+See [troubleshooting.md — "SQL Server Agent Not Running"](troubleshooting.md#sql-server-agent-not-running--cdc-not-capturing) for details.
+
+### Aurora PostgreSQL Replication
+
+If deploying Aurora as a CDC source (reverse path), verify logical replication is enabled in the Aurora parameter group:
+```sql
+-- Check parameter group setting
+SHOW rds.logical_replication;
+-- Should return: on
+```
+
+If it's not set, contact your DBA — it requires a parameter group edit and Aurora restart.
+
+---
+
 ## Apache Kafka® Brokers (KRaft Election)
 
 | Elapsed | Status | Notes |

@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here.
 
+## [1.2.0] — 2026-05-24
+
+### Major Fixes
+
+- **Fixed** bi-directional CDC field naming asymmetry: SQL Server source now has symmetric `unwrap, topicCase, valueCase` transforms (same as Aurora source). Previously, forward path (SQL Server → Aurora) was missing `unwrap + valueCase`, causing JDBC sink to create wrong column names from wrapped Debezium envelope. Now both paths publish flat row payloads with correct field name case to Schema Registry.
+  - `debezium-sqlserver-source.json`: Added `unwrap` before `topicCase, valueCase`
+  - `jdbc-sink-aurora.json`: Removed redundant `unwrap, valueCase` (now done at source)
+  - Tags: `before-source-unwrap-bi-direction` → `working-bi-directional-source-unwrap`
+
+- **Fixed** `quote.identifiers=true` on SQL Server sink to preserve camelCase column names in auto-created DDL (Debezium JDBC sink lowercases columns by default)
+
+- **Added** `generate-continuous-traffic.sh` now generates traffic on both Aurora CDC source tables (`products` + `inventory_log`) for testing reverse path end-to-end
+
+### Deployment Enhancements
+
+- **Private repo only:** `reset-poc-full.sh` now has **Stage 2.5: Reset Connect Workers** — stops Connect, clears internal offset storage, restarts fresh. Prevents "LSN no longer available" failures when prior deployments failed (e.g., SQL Server Agent down)
+
+### Documentation
+
+- Updated troubleshooting guide with "LSN no longer available" root cause and fix
+- Added SQL Server Agent startup check to operational docs
+- Documented unwrap transform placement + why it matters (symmetry between forward/reverse paths)
+
 ## [1.1.0] — 2026-04-22
 
 ### Changes

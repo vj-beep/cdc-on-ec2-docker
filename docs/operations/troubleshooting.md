@@ -44,6 +44,82 @@ docker compose -f docker-compose.yml -f docker-compose.connect-schema-registry.y
 
 ## Common Issues
 
+### "LSN no longer available on the server" / Debezium Source in FAILED State
+
+**Symptoms:** Debezium source connector task is `FAILED` with error:
+```
+The connector is trying to read change stream starting at SqlServerOffsetContext
+[sourceInfoSchema=..., changeLsn=NULL, commitLsn=00009110:00017b58:0122, ...]
+but this is no longer available on the server. Reconfigure the connector to use
+a snapshot mode when needed.
+```
+
+**Root Cause:** Stale Connect offset storage. Connect's internal Kafka topics (`__connect-offsets`, etc.) retain references to Log Sequence Numbers (LSNs) that have been purged from the SQL Server or Aurora transaction log. This happens when:
+1. A previous deployment failed (e.g., SQL Server Agent was stopped)
+2. CDC events were never captured to the change tables (no source data for Debezium to read)
+3. The transaction log aged out and deleted those LSN records
+4. Connect's offset storage still references those deleted LSNs
+
+**Fix:**
+
+**Option A (Recommended):** Use the reset script from the private repo (internal tools):
+```bash
+# Completely resets offsets + databases + redeploys connectors
+cd infra-private && ./scripts/reset-poc-full.sh -y
+```
+
+This script's **Stage 2.5** stops Connect, clears the offset storage topics, restarts Connect, and redeploys all connectors fresh.
+
+**Option B (Manual):** Clear offsets manually:
+1. Stop the affected source connector
+2. Delete the Connect internal topics (your Kafka admin can do this):
+   - `__connect-offsets`
+   - `__connect-status`
+   - `__connect-configs`
+3. Restart Connect workers
+4. Redeploy connectors: `./scripts/6-deploy-connectors.sh`
+
+---
+
+### SQL Server Agent Not Running — CDC Not Capturing
+
+**Symptoms:** Debezium SQL Server source connector is RUNNING, but no data flows. After some time, you get the "LSN no longer available" error (above).
+
+**Root Cause:** SQL Server Agent is a critical service that runs scheduled CDC capture jobs. If it's stopped:
+- CDC changes are NOT written to the Change Tracking tables
+- Debezium has nothing to read
+- Offsets become stale (LSN positions get purged before Debezium can read them)
+
+**Check if Agent is running:**
+```powershell
+# On the SQL Server EC2 instance (via SSM):
+Get-Service SQLSERVERAGENT | Select-Object Status
+
+# Should return: Status
+#              ------
+#              Running
+```
+
+**Start SQL Server Agent if stopped:**
+```powershell
+Start-Service SQLSERVERAGENT -Force
+```
+
+**Verify CDC capture job is running:**
+```sql
+-- Check if capture job exists and is enabled
+SELECT name, enabled FROM msdb.dbo.sysjobs WHERE name LIKE 'cdc.%capture%';
+
+-- Check last run time
+EXEC msdb.dbo.sp_help_job @job_name = 'cdc.pocdb_capture';
+```
+
+**After starting Agent:**
+- Wait 30 seconds for the capture job to process pending changes
+- Restart the Debezium source connector: `curl -X POST http://localhost:8083/connectors/debezium-sqlserver-source/restart`
+
+---
+
 ### Connector Won't Start / Fails Immediately
 
 **Symptoms:** Task state is `FAILED` immediately after deployment.
