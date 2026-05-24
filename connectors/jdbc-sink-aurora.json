@@ -21,11 +21,7 @@
     "value.converter": "io.confluent.connect.avro.AvroConverter",
     "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
 
-    "transforms": "unwrap,routeTopics,keyCase,valueCase",
-
-    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
-    "transforms.unwrap.drop.tombstones": "false",
-    "transforms.unwrap.delete.handling.mode": "rewrite",
+    "transforms": "routeTopics,keyCase",
 
     "transforms.routeTopics.type": "org.apache.kafka.connect.transforms.RegexRouter",
     "transforms.routeTopics.regex": "${JDBC_SINK_AURORA_TOPIC_REGEX}",
@@ -34,10 +30,6 @@
     "transforms.keyCase.type": "com.github.jcustenborder.kafka.connect.transform.common.ChangeCase$Key",
     "transforms.keyCase.from": "LOWER_CAMEL",
     "transforms.keyCase.to": "LOWER_UNDERSCORE",
-
-    "transforms.valueCase.type": "com.github.jcustenborder.kafka.connect.transform.common.ChangeCase$Value",
-    "transforms.valueCase.from": "LOWER_CAMEL",
-    "transforms.valueCase.to": "LOWER_UNDERSCORE",
 
     "consumer.override.fetch.max.wait.ms": "10",
     "consumer.override.fetch.min.bytes": "1",
