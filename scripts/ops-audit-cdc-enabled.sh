@@ -437,7 +437,10 @@ SQLEOF
   echo ""
   echo -e "${BOLD}${BLUE}─ Copy/Paste for .env${NC}"
   if [[ -n "$table_list" ]]; then
-    echo -e "  ${GREEN}SQLSERVER_TABLE_INCLUDE_LIST='${table_list}'${NC}"
+    echo -e "  ${GREEN}SQLSERVER_TABLE_INCLUDE_LIST=${table_list}${NC}"
+    echo ""
+    echo -e "${BOLD}${BLUE}─ Or run this to update .env:${NC}"
+    echo -e "  ${GREY}sed -i '/^SQLSERVER_TABLE_INCLUDE_LIST=/d' .env && echo \"SQLSERVER_TABLE_INCLUDE_LIST=${table_list}\" >> .env${NC}"
   else
     echo -e "  ${GREY}# No CDC-enabled tables found${NC}"
   fi
@@ -648,7 +651,10 @@ audit_aurora() {
   echo ""
   echo -e "${BOLD}${BLUE}─ Copy/Paste for .env${NC}"
   if [[ -n "$table_list" ]]; then
-    echo -e "  ${GREEN}AURORA_TABLE_INCLUDE_LIST='${table_list}'${NC}"
+    echo -e "  ${GREEN}AURORA_TABLE_INCLUDE_LIST=${table_list}${NC}"
+    echo ""
+    echo -e "${BOLD}${BLUE}─ Or run this to update .env:${NC}"
+    echo -e "  ${GREY}sed -i '/^AURORA_TABLE_INCLUDE_LIST=/d' .env && echo \"AURORA_TABLE_INCLUDE_LIST=${table_list}\" >> .env${NC}"
   else
     echo -e "  ${GREY}# No tables in publication${NC}"
   fi
