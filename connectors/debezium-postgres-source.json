@@ -10,6 +10,7 @@
     "database.password": "${AURORA_PASSWORD}",
     "database.dbname": "${AURORA_DATABASE}",
     "table.include.list": "${AURORA_TABLE_INCLUDE_LIST}",
+    "table.exclude.list": "${AURORA_TABLE_EXCLUDE_LIST}",
 
     "topic.prefix": "${AURORA_TOPIC_PREFIX}",
     "schema.include.list": "${AURORA_SCHEMA_INCLUDE_LIST}",

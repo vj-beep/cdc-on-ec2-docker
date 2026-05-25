@@ -433,14 +433,16 @@ SQLEOF
   job_result=$(SQLCMDPASSWORD="$pass" sqlcmd -S "${host},${port}" -U "$user" -d "$database" -C -W -Q "$job_query" 2>&1)
   echo -e "  ${GREY}${job_result}${NC}"
 
-  # Output env var for .env copy-paste
+  # Output discovered tables and optional .env override
   echo ""
-  echo -e "${BOLD}${BLUE}─ Copy/Paste for .env${NC}"
+  echo -e "${BOLD}${BLUE}─ CDC-Enabled Tables (auto-discovered by connector)${NC}"
   if [[ -n "$table_list" ]]; then
-    echo -e "  ${GREEN}SQLSERVER_TABLE_INCLUDE_LIST=${table_list}${NC}"
+    echo -e "  ${GREEN}${table_list}${NC}"
     echo ""
-    echo -e "${BOLD}${BLUE}─ Or run this to update .env:${NC}"
-    echo -e "  ${GREY}sed -i '/^SQLSERVER_TABLE_INCLUDE_LIST=/d' .env && echo \"SQLSERVER_TABLE_INCLUDE_LIST=${table_list}\" >> .env${NC}"
+    echo -e "  ${GREY}# Recommended: leave SQLSERVER_TABLE_INCLUDE_LIST= blank in .env${NC}"
+    echo -e "  ${GREY}# The connector automatically captures all CDC-enabled tables above.${NC}"
+    echo -e "  ${GREY}# Only set an explicit list if you need to restrict to a subset:${NC}"
+    echo -e "  ${GREY}# sed -i '/^SQLSERVER_TABLE_INCLUDE_LIST=/d' .env && echo \"SQLSERVER_TABLE_INCLUDE_LIST=${table_list}\" >> .env${NC}"
   else
     echo -e "  ${GREY}# No CDC-enabled tables found${NC}"
   fi
@@ -647,14 +649,16 @@ audit_aurora() {
     echo -e "  ${GREY}${no_pub_count} table(s)${NC} not in publication"
   fi
 
-  # Output env var for .env copy-paste
+  # Output discovered tables and optional .env override
   echo ""
-  echo -e "${BOLD}${BLUE}─ Copy/Paste for .env${NC}"
+  echo -e "${BOLD}${BLUE}─ Published Tables (auto-discovered by connector)${NC}"
   if [[ -n "$table_list" ]]; then
-    echo -e "  ${GREEN}AURORA_TABLE_INCLUDE_LIST=${table_list}${NC}"
+    echo -e "  ${GREEN}${table_list}${NC}"
     echo ""
-    echo -e "${BOLD}${BLUE}─ Or run this to update .env:${NC}"
-    echo -e "  ${GREY}sed -i '/^AURORA_TABLE_INCLUDE_LIST=/d' .env && echo \"AURORA_TABLE_INCLUDE_LIST=${table_list}\" >> .env${NC}"
+    echo -e "  ${GREY}# Recommended: leave AURORA_TABLE_INCLUDE_LIST= blank in .env${NC}"
+    echo -e "  ${GREY}# The connector automatically captures all tables in the publication above.${NC}"
+    echo -e "  ${GREY}# Only set an explicit list if you need to restrict to a subset:${NC}"
+    echo -e "  ${GREY}# sed -i '/^AURORA_TABLE_INCLUDE_LIST=/d' .env && echo \"AURORA_TABLE_INCLUDE_LIST=${table_list}\" >> .env${NC}"
   else
     echo -e "  ${GREY}# No tables in publication${NC}"
   fi

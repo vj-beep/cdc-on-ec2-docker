@@ -11,6 +11,7 @@
     "database.names": "${SQLSERVER_DATABASE}",
     "database.encrypt": "false",
     "table.include.list": "${SQLSERVER_TABLE_INCLUDE_LIST}",
+    "table.exclude.list": "${SQLSERVER_TABLE_EXCLUDE_LIST}",
 
     "topic.prefix": "${SQLSERVER_TOPIC_PREFIX}",
     "message.key.columns": "${SQLSERVER_MESSAGE_KEY_COLUMNS}",
