@@ -338,6 +338,7 @@ SQLEOF
   fi
 
   local count=0
+  local table_list=""
   printf "  ${GREY}%-15s %-30s %-10s %-35s %-10s %-20s %12s${NC}\n" "SCHEMA" "TABLE" "HAS_PK" "CAPTURE_INSTANCE" "NET_CHG" "CDC_ENABLED_AT" "ROW_COUNT"
   printf "  ${GREY}%-15s %-30s %-10s %-35s %-10s %-20s %12s${NC}\n" "───────────────" "──────────────────────────────" "──────────" "───────────────────────────────────" "──────────" "────────────────────" "────────────"
 
@@ -353,6 +354,13 @@ SQLEOF
     [[ -z "$col_schema" || "$col_schema" == "---"* ]] && continue
 
     printf "  ${GREEN}●${NC} %-14s %-30s %-10s %-35s %-10s %-20s %12s\n" "$col_schema" "$col_table" "$col_pk" "$col_instance" "$col_net" "$col_date" "$col_rows"
+
+    # Build fully qualified table name
+    if [[ -z "$table_list" ]]; then
+      table_list="${col_schema}.${col_table}"
+    else
+      table_list="${table_list},${col_schema}.${col_table}"
+    fi
     ((count++))
   done <<< "$result"
 
@@ -424,6 +432,15 @@ SQLEOF
   local job_result
   job_result=$(SQLCMDPASSWORD="$pass" sqlcmd -S "${host},${port}" -U "$user" -d "$database" -C -W -Q "$job_query" 2>&1)
   echo -e "  ${GREY}${job_result}${NC}"
+
+  # Output env var for .env copy-paste
+  echo ""
+  echo -e "${BOLD}${BLUE}─ Copy/Paste for .env${NC}"
+  if [[ -n "$table_list" ]]; then
+    echo -e "  ${GREEN}SQLSERVER_TABLE_INCLUDE_LIST='${table_list}'${NC}"
+  else
+    echo -e "  ${GREY}# No CDC-enabled tables found${NC}"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -559,12 +576,20 @@ audit_aurora() {
      ORDER BY pt.schemaname, pt.tablename;" 2>&1)
 
   local count=0
+  local table_list=""
   printf "  ${GREY}%-15s %-30s %-10s %12s${NC}\n" "SCHEMA" "TABLE" "HAS_PK" "ROW_COUNT"
   printf "  ${GREY}%-15s %-30s %-10s %12s${NC}\n" "───────────────" "──────────────────────────────" "──────────" "────────────"
 
   while IFS='|' read -r col_schema col_table col_pk col_rows; do
     [[ -z "$col_schema" ]] && continue
     printf "  ${GREEN}●${NC} %-14s %-30s %-10s %12s\n" "$col_schema" "$col_table" "$col_pk" "$col_rows"
+
+    # Build fully qualified table name
+    if [[ -z "$table_list" ]]; then
+      table_list="${col_schema}.${col_table}"
+    else
+      table_list="${table_list},${col_schema}.${col_table}"
+    fi
     ((count++))
   done <<< "$pub_tables"
 
@@ -617,6 +642,15 @@ audit_aurora() {
     echo -e "  ${GREEN}All tables in [${schema}] are in the publication${NC}"
   else
     echo -e "  ${GREY}${no_pub_count} table(s)${NC} not in publication"
+  fi
+
+  # Output env var for .env copy-paste
+  echo ""
+  echo -e "${BOLD}${BLUE}─ Copy/Paste for .env${NC}"
+  if [[ -n "$table_list" ]]; then
+    echo -e "  ${GREEN}AURORA_TABLE_INCLUDE_LIST='${table_list}'${NC}"
+  else
+    echo -e "  ${GREY}# No tables in publication${NC}"
   fi
 }
 
