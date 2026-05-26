@@ -18,7 +18,7 @@
     "plugin.name": "pgoutput",
     "slot.name": "${PG_SLOT_NAME}",
     "publication.name": "${PG_PUBLICATION_NAME}",
-    "publication.autocreate.mode": "filtered",
+    "publication.autocreate.mode": "disabled",
 
     "topic.creation.default.replication.factor": "${KAFKA_REPLICATION_FACTOR}",
     "topic.creation.default.partitions": "${KAFKA_DEFAULT_PARTITIONS}",
