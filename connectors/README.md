@@ -69,24 +69,20 @@ Add a `MaskField` SMT to the source connector. Example for PII columns:
 "transforms.maskPii.replacement": ""
 ```
 
-## Field Name Normalization (SMTs)
+## Transforms
 
-All four connectors use **Schema Mapping Transforms (SMTs)** to normalize field names between SQL Server (camelCase) and Aurora (snake_case):
+All four connectors use **Kafka Connect Single Message Transforms (SMTs)** for envelope extraction and topic routing:
 
 | Connector | Transforms | Purpose |
 |---|---|---|
-| `debezium-sqlserver-source` | `unwrap, topicCase, valueCase` | Extract row payload, convert field names LOWER_CAMEL→LOWER_UNDERSCORE |
-| `jdbc-sink-aurora` | `routeTopics, keyCase` | Route to correct table, convert key fields LOWER_CAMEL→LOWER_UNDERSCORE |
-| `debezium-postgres-source` | `unwrap, topicCase, valueCase` | Extract row payload, convert field names LOWER_UNDERSCORE→LOWER_CAMEL |
-| `jdbc-sink-sqlserver` | `routeTopics, keyCase` + `quote.identifiers=true` | Route to correct table, convert key fields LOWER_UNDERSCORE→LOWER_CAMEL, preserve case in DDL |
+| `debezium-sqlserver-source` | `unwrap` | Extract row payload from Debezium envelope |
+| `jdbc-sink-aurora` | `routeTopics` | Route records to target table by name (RegexRouter) |
+| `debezium-postgres-source` | `unwrap` | Extract row payload from Debezium envelope |
+| `jdbc-sink-sqlserver` | `routeTopics` | Route records to target table by name (RegexRouter) |
 
-**Critical:** The `unwrap` transform must be on the **source connectors**, not the sink. Why?
-- Debezium publishes wrapped envelopes (with `op`, `ts_ms`, `before`, `after` fields)
-- The JDBC sink uses the Avro schema from Schema Registry directly to auto-generate DDL
-- If unwrap happens only on the sink, the SR schema is still wrapped → JDBC sink creates wrong column names
-- By unwrapping at the source, the flat row payload is what gets published → SR schema has correct field names → JDBC sink DDL is correct
+**Note on `unwrap`:** The `unwrap` transform (Debezium built-in) must be on source connectors. Debezium publishes wrapped envelopes with `op`, `ts_ms`, `before`, `after` fields. The JDBC sink uses the Avro schema from Schema Registry to auto-generate DDL — unwrapping at the source ensures the flat row payload reaches Schema Registry, so the generated table schema and columns are correct.
 
-Both paths are now **symmetric**: source unwraps + normalizes field names → sink applies remaining field transforms (key fields only).
+**Field names across systems:** Source and sink field names must match exactly. The POC uses matching schemas on both databases; for systems with different naming conventions (e.g., camelCase ↔ snake_case), implement custom SMTs or normalize at the application level.
 
 ## Loop Prevention
 
