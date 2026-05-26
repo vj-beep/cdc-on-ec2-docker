@@ -37,10 +37,6 @@ RUN curl -fsSL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-jd
     tar -xzf /tmp/debezium-jdbc.tar.gz -C /usr/share/confluent-hub-components/ && \
     rm -f /tmp/debezium-jdbc.tar.gz
 
-# Case-conversion SMTs: ChangeTopicCase, ChangeCase$Key, ChangeCase$Value.
-# Must run before proxy is cleared — JAVA_TOOL_OPTIONS carries proxy settings for confluent-hub.
-RUN confluent-hub install --no-prompt jcustenborder/kafka-connect-transform-common:latest
-
 # Clear proxy so it does not leak into Connect workers at runtime
 ENV JAVA_TOOL_OPTIONS= \
     HTTP_PROXY= \
