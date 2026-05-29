@@ -26,3 +26,6 @@ kafka-audit*/
 # Docker & local artifacts
 .DS_Store
 *.log
+
+# SMT Maven build output (built on host before docker build, not committed)
+connect/smt/target/

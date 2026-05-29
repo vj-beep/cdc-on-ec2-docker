@@ -22,11 +22,17 @@
     "value.converter": "io.confluent.connect.avro.AvroConverter",
     "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
 
-    "transforms": "routeTopics",
+    "transforms": "routeTopics,caseRestorer",
 
     "transforms.routeTopics.type": "org.apache.kafka.connect.transforms.RegexRouter",
     "transforms.routeTopics.regex": "${JDBC_SINK_SQLSERVER_TOPIC_REGEX}",
     "transforms.routeTopics.replacement": "$1",
+
+    "transforms.caseRestorer.type": "com.example.kafka.connect.transforms.SqlServerCaseRestorer",
+    "transforms.caseRestorer.jdbc.url": "jdbc:sqlserver://${SQLSERVER_HOST}:${SQLSERVER_PORT};databaseName=${SQLSERVER_DATABASE};encrypt=false",
+    "transforms.caseRestorer.jdbc.user": "${SQLSERVER_USER}",
+    "transforms.caseRestorer.jdbc.password": "${SQLSERVER_PASSWORD}",
+    "transforms.caseRestorer.table.schema": "dbo",
 
     "consumer.override.fetch.max.wait.ms": "10",
     "consumer.override.fetch.min.bytes": "1",
