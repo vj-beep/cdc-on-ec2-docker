@@ -33,10 +33,19 @@ source "$ENV_FILE"
 # ---------------------------------------------------------------------------
 if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
     echo "[*] Phase 4 (local): Building custom Connect image..."
-    echo "[*] Building image (this may take 5-10 minutes)..."
+    echo "[*] Step 1: Build SqlServerCaseRestorer SMT JAR..."
 
     export HTTP_PROXY HTTPS_PROXY NO_PROXY
     cd "$SCRIPT_DIR"
+
+    # Build SMT JAR
+    if [[ ! -f "connect/smt/target/kafka-connect-sqlserver-case-restorer-1.0.0.jar" ]]; then
+        which mvn >/dev/null 2>&1 || dnf install -y maven
+        mvn -f connect/smt/pom.xml clean package -q
+    fi
+
+    echo "[*] Step 2: Build Docker image..."
+    echo "[*] Building image (this may take 5-10 minutes)..."
     DOCKER_BUILDKIT=0 docker compose --env-file .env -f docker-compose.connect-build.yml build
 
     echo ""
@@ -74,7 +83,7 @@ if [[ "$DISPATCH_MODE" == "ssh" ]]; then
     ssh -i "$SSH_KEY" \
         -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
         "${DEPLOY_USER}@${CONNECT_1_IP}" \
-        "cd ${DEPLOY_DIR} && source ${DEPLOY_DIR}/.env && export HTTP_PROXY HTTPS_PROXY NO_PROXY && DOCKER_BUILDKIT=0 docker compose --env-file ${DEPLOY_DIR}/.env -f docker-compose.connect-build.yml build && docker images | grep cdc-connect" 2>&1
+        "cd ${DEPLOY_DIR} && source ${DEPLOY_DIR}/.env && export HTTP_PROXY HTTPS_PROXY NO_PROXY && which mvn >/dev/null 2>&1 || sudo dnf install -y maven && mvn -f connect/smt/pom.xml clean package -q && DOCKER_BUILDKIT=0 docker compose --env-file ${DEPLOY_DIR}/.env -f docker-compose.connect-build.yml build && docker images | grep cdc-connect" 2>&1
 
     if [[ $? -eq 0 ]]; then
         echo ""
@@ -106,9 +115,9 @@ else
     cmd_json=$(cat <<EOF
 {
   "commands": [
-    "cd ${DEPLOY_DIR} && source ${DEPLOY_DIR}/.env && export HTTP_PROXY HTTPS_PROXY NO_PROXY && DOCKER_BUILDKIT=0 docker compose --env-file ${DEPLOY_DIR}/.env -f docker-compose.connect-build.yml build && docker images | grep cdc-connect"
+    "cd ${DEPLOY_DIR} && source ${DEPLOY_DIR}/.env && export HTTP_PROXY HTTPS_PROXY NO_PROXY && which mvn >/dev/null 2>&1 || sudo dnf install -y maven && mvn -f connect/smt/pom.xml clean package -q && DOCKER_BUILDKIT=0 docker compose --env-file ${DEPLOY_DIR}/.env -f docker-compose.connect-build.yml build && docker images | grep cdc-connect"
   ],
-  "executionTimeout": ["900"]
+  "executionTimeout": ["1200"]
 }
 EOF
 )
