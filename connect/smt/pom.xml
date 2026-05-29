@@ -11,9 +11,7 @@
   <packaging>jar</packaging>
 
   <properties>
-    <java.version>11</java.version>
-    <maven.compiler.source>${java.version}</maven.compiler.source>
-    <maven.compiler.target>${java.version}</maven.compiler.target>
+    <maven.compiler.release>11</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <kafka.version>3.7.0</kafka.version>
     <junit.version>5.10.2</junit.version>
@@ -24,7 +22,9 @@
   </properties>
 
   <dependencies>
-    <!-- Provided by Kafka Connect runtime — compile-only -->
+    <!-- Kafka Connect API — provided at runtime by the Connect worker.
+         Declared once as "provided" so it is on the compile classpath
+         but excluded from the output JAR. -->
     <dependency>
       <groupId>org.apache.kafka</groupId>
       <artifactId>connect-api</artifactId>
@@ -44,7 +44,7 @@
       <scope>provided</scope>
     </dependency>
 
-    <!-- Provided by connect/jars/ plugin path at runtime -->
+    <!-- SQL Server JDBC driver — provided by connect/jars/ plugin path at runtime. -->
     <dependency>
       <groupId>com.microsoft.sqlserver</groupId>
       <artifactId>mssql-jdbc</artifactId>
@@ -71,19 +71,6 @@
       <version>${mockito.version}</version>
       <scope>test</scope>
     </dependency>
-    <!-- connect-api is provided at runtime; tests need the real jar on classpath -->
-    <dependency>
-      <groupId>org.apache.kafka</groupId>
-      <artifactId>connect-api</artifactId>
-      <version>${kafka.version}</version>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.kafka</groupId>
-      <artifactId>connect-transforms</artifactId>
-      <version>${kafka.version}</version>
-      <scope>test</scope>
-    </dependency>
     <!-- Logging implementation for tests only -->
     <dependency>
       <groupId>ch.qos.logback</groupId>
@@ -99,15 +86,19 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
+        <configuration>
+          <!-- maven.compiler.release already set in properties;
+               explicitly passing source/target is intentionally omitted
+               to avoid the "system modules path not set" warning on JDK 17+. -->
+        </configuration>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.2.5</version>
       </plugin>
-      <!-- Produces a single fat JAR with only compile-scope deps included.
-           connect-api, slf4j, and mssql-jdbc are excluded (provided) so they
-           don't shadow the versions already on the Connect worker classpath. -->
+      <!-- Fat JAR: includes only compile-scope deps (none here).
+           connect-api, slf4j, and mssql-jdbc are excluded (provided). -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>

@@ -247,9 +247,13 @@ class SqlServerCaseRestorerTest {
         @Test
         @DisplayName("Throws ConfigException when SQL Server is unreachable")
         void throwsOnConnectionFailure() throws Exception {
+            // Create the exception BEFORE entering mockStatic — SQLException.<init>
+            // calls DriverManager.getLogWriter() internally, which confuses the
+            // static mock and produces UnfinishedStubbingException if done inside.
+            SQLException sqlEx = new SQLException("Connection refused");
             try (MockedStatic<DriverManager> dm = mockStatic(DriverManager.class)) {
                 dm.when(() -> DriverManager.getConnection(anyString(), anyString(), anyString()))
-                  .thenThrow(new SQLException("Connection refused"));
+                  .thenThrow(sqlEx);
 
                 assertThrows(org.apache.kafka.common.config.ConfigException.class,
                     () -> smt.configure(configProps()));
