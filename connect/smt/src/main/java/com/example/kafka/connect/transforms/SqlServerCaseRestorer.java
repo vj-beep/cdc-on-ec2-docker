@@ -25,9 +25,9 @@ import java.util.Map;
  * Without this SMT the sink creates a new lowercase table instead of
  * writing into the existing mixed-case one.
  *
- * Solution: At startup this SMT queries INFORMATION_SCHEMA.TABLES once,
- * builds a lowercase→actual map, then rewrites the topic tail on every
- * record before the sink sees it.
+ * Solution: At startup this SMT queries sys.tables once, builds a
+ * lowercase→actual map, then rewrites the topic tail on every record
+ * before the sink sees it.
  *
  * Place this SMT *after* any RegexRouter in the transforms chain so it
  * receives only the bare table-name tail, not the full topic prefix.

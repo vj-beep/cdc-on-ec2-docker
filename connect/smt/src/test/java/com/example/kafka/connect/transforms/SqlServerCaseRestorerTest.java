@@ -223,13 +223,14 @@ class SqlServerCaseRestorerTest {
         }
 
         @Test
-        @DisplayName("Populates table map from INFORMATION_SCHEMA result set")
+        @DisplayName("Populates table map from sys.tables result set")
         void populatesMapFromResultSet() throws Exception {
             when(conn.prepareStatement(anyString())).thenReturn(ps);
             when(ps.executeQuery()).thenReturn(rs);
             // Simulate two rows: FlagSet, workItem
             when(rs.next()).thenReturn(true, true, false);
-            when(rs.getString("TABLE_NAME")).thenReturn("FlagSet", "workItem");
+            // Column alias must match production code: "table_name" (lowercase)
+            when(rs.getString("table_name")).thenReturn("FlagSet", "workItem");
 
             try (MockedStatic<DriverManager> dm = mockStatic(DriverManager.class)) {
                 dm.when(() -> DriverManager.getConnection(anyString(), anyString(), anyString()))
