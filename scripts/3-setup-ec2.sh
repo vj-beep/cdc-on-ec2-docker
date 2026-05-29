@@ -163,7 +163,7 @@ fi
 SUMMARY=()
 
 # ---------------------------------------------------------------------------
-# 0a. Set proxy env vars for dnf/curl (before any package installs)
+# 0a. Set proxy env vars and configure dnf/yum for package installs
 # ---------------------------------------------------------------------------
 if [[ -f .env ]]; then
     _P=$(grep "^HTTP_PROXY=" .env | cut -d= -f2- || true)
@@ -173,6 +173,15 @@ if [[ -f .env ]]; then
         export https_proxy="${HTTPS_PROXY}"
         export NO_PROXY="$(grep "^NO_PROXY=" .env | cut -d= -f2- || true)"
         export no_proxy="${NO_PROXY}"
+
+        # Configure dnf/yum to use proxy
+        PROXY_HOST=$(echo "${HTTP_PROXY}" | sed 's|.*://||' | cut -d: -f1)
+        PROXY_PORT=$(echo "${HTTP_PROXY}" | sed 's|.*://||' | cut -d: -f2)
+        if [[ -n "$PROXY_HOST" && -n "$PROXY_PORT" ]]; then
+            echo "proxy=http://${PROXY_HOST}:${PROXY_PORT}" >> /etc/dnf/dnf.conf 2>/dev/null || true
+            echo "proxy=http://${PROXY_HOST}:${PROXY_PORT}" >> /etc/yum.conf 2>/dev/null || true
+        fi
+
         info "Proxy configured for package installs: ${HTTPS_PROXY}"
     fi
 fi
