@@ -43,7 +43,6 @@ ENV JAVA_TOOL_OPTIONS= \
 # Download mssql-jdbc-12.4.2.jre11.jar from Microsoft and place it in connect/jars/ before building.
 COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
 
-# Build and install the SqlServerCaseRestorer SMT.
-# The JAR is built on the host via `mvn -f connect/smt/pom.xml clean package -q`
-# and the output is copied here so the Docker build stays offline-friendly.
-COPY connect/smt/target/kafka-connect-sqlserver-case-restorer-*.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
+# SqlServerCaseRestorer SMT — pre-built JAR committed alongside mssql-jdbc.
+# No Maven build step required; works in proxy/air-gapped environments.
+COPY connect/jars/kafka-connect-sqlserver-case-restorer-*.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
