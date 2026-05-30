@@ -4,6 +4,8 @@ import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.data.Field;
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.data.SchemaBuilder;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.transforms.Transformation;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
@@ -241,28 +243,29 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
             return struct;
         }
 
-        // Kafka Connect Struct schema is immutable — field names cannot be renamed after creation.
-        // The column case mapping is informational for logging / debugging.
-        // The JDBC sink connector will use its own SQL query building logic, which should
-        // perform case-insensitive column matching when inserting/updating records.
-        // Without renaming the Struct fields, we can only log the mapping discovered.
-        //
-        // For production, if case sensitivity is critical, either:
-        //   1. Enable quote.identifiers on the JDBC sink (allows case-insensitive match)
-        //   2. Pre-create lowercase Aurora tables and use COLLATE clauses on SQL Server
-        //   3. Implement a custom JDBC sink plugin that applies the column mapping
+        // Build a new Schema with renamed fields.
+        SchemaBuilder builder = SchemaBuilder.struct().name(struct.schema().name());
+        if (struct.schema().isOptional()) builder.optional();
 
         for (Field field : struct.schema().fields()) {
-            String fieldName = field.name();
-            String actualName = columnMap.get(fieldName.toLowerCase());
-
-            if (actualName != null && !actualName.equals(fieldName)) {
-                log.debug("SqlServerCaseRestorer: column '{}' in topic maps to SQL Server column '{}' " +
-                         "(case-insensitive match expected by JDBC sink)", fieldName, actualName);
+            String actual = columnMap.get(field.name().toLowerCase());
+            String renamed = (actual != null) ? actual : field.name();
+            if (!renamed.equals(field.name())) {
+                log.debug("SqlServerCaseRestorer: renaming field '{}' -> '{}'", field.name(), renamed);
             }
+            builder.field(renamed, field.schema());
         }
 
-        return struct;
+        Schema newSchema = builder.build();
+        Struct newStruct = new Struct(newSchema);
+
+        for (Field field : struct.schema().fields()) {
+            String actual = columnMap.get(field.name().toLowerCase());
+            String renamed = (actual != null) ? actual : field.name();
+            newStruct.put(renamed, struct.get(field));
+        }
+
+        return newStruct;
     }
 
     @Override
