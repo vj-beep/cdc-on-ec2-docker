@@ -27,19 +27,16 @@ kafka-audit*/
 .DS_Store
 *.log
 
-# SMT Maven build output (built on host before docker build, not committed)
+# Maven build outputs (SMT compilation)
 connect/smt/target/
+connect/smt/.settings/
+connect/smt/.classpath
+connect/smt/.project
 
 # Docker build artifacts — too large for git
 docker-images/
 *.tar.gz
 !connect/debezium-libs/
-
-# Maven build outputs
-connect/smt/target/
-connect/smt/.settings/
-connect/smt/.classpath
-connect/smt/.project
 
 # Docker build logs
 /tmp/docker-build.log
