@@ -16,7 +16,7 @@
     "schema.evolution": "none",
     "auto.create": "false",
     "auto.evolve": "false",
-    "quote.identifiers": "false",
+    "quote.identifiers": "true",
     "delete.enabled": "true",
 
     "key.converter": "org.apache.kafka.connect.json.JsonConverter",
@@ -35,6 +35,12 @@
     "transforms.caseRestorer.jdbc.user": "${SQLSERVER_USER}",
     "transforms.caseRestorer.jdbc.password": "${SQLSERVER_PASSWORD}",
     "transforms.caseRestorer.table.schema": "dbo",
+
+    "column.naming.strategy": "com.example.kafka.connect.transforms.SqlServerColumnNamingStrategy",
+    "column.naming.strategy.jdbc.url": "jdbc:sqlserver://${SQLSERVER_HOST}:${SQLSERVER_PORT};databaseName=${SQLSERVER_DATABASE};encrypt=false",
+    "column.naming.strategy.jdbc.user": "${SQLSERVER_USER}",
+    "column.naming.strategy.jdbc.password": "${SQLSERVER_PASSWORD}",
+    "column.naming.strategy.table.schema": "dbo",
 
     "consumer.override.fetch.max.wait.ms": "10",
     "consumer.override.fetch.min.bytes": "1",

@@ -223,12 +223,20 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
         }
 
         if (!newTopic.equals(topic) || newValue != record.value() || newKey != record.key()) {
+            // Use the renamed Struct's own schema so Debezium JDBC sink sees camelCase field names
+            // in valueSchema(). Passing record.valueSchema() here would leave the lowercase schema
+            // on the SinkRecord — Debezium reads valueSchema() for hasColumn() validation, causing
+            // a false "missing column" detection and a failed ALTER TABLE attempt.
+            Schema newValueSchema = (newValue instanceof Struct)
+                ? ((Struct) newValue).schema() : record.valueSchema();
+            Schema newKeySchema = (newKey instanceof Struct)
+                ? ((Struct) newKey).schema() : record.keySchema();
             return record.newRecord(
                 newTopic,
                 record.kafkaPartition(),
-                record.keySchema(),
+                newKeySchema,
                 newKey,
-                record.valueSchema(),
+                newValueSchema,
                 newValue,
                 record.timestamp(),
                 record.headers()
