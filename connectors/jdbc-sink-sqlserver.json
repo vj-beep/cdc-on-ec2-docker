@@ -13,14 +13,16 @@
 
     "insert.mode": "upsert",
     "primary.key.mode": "record_key",
-    "schema.evolution": "basic",
+    "schema.evolution": "none",
+    "auto.create": "false",
+    "auto.evolve": "false",
     "quote.identifiers": "false",
     "delete.enabled": "true",
 
-    "key.converter": "io.confluent.connect.avro.AvroConverter",
-    "key.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
-    "value.converter": "io.confluent.connect.avro.AvroConverter",
-    "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true",
 
     "transforms": "routeTopics,caseRestorer",
 

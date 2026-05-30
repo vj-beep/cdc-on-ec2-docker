@@ -20,22 +20,15 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     no_proxy=${NO_PROXY} \
     JAVA_TOOL_OPTIONS=${PROXY_HOST:+"-Dhttp.proxyHost=${PROXY_HOST} -Dhttp.proxyPort=${PROXY_PORT} -Dhttps.proxyHost=${PROXY_HOST} -Dhttps.proxyPort=${PROXY_PORT}"}
 
-# All three Debezium connectors installed from Maven Central.
-# Confluent Hub lags behind Maven releases — 3.2.6 available on Maven but not Hub.
-RUN curl -fsSL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-sqlserver/${DEBEZIUM_VERSION}/debezium-connector-sqlserver-${DEBEZIUM_VERSION}-plugin.tar.gz" \
-      -o /tmp/debezium-sqlserver.tar.gz && \
-    tar -xzf /tmp/debezium-sqlserver.tar.gz -C /usr/share/confluent-hub-components/ && \
-    rm -f /tmp/debezium-sqlserver.tar.gz
+# Copy pre-downloaded Debezium connectors from build context.
+# These are downloaded locally and COPY'd into the build to avoid Maven Central rate-limiting.
+COPY connect/debezium-libs/debezium-connector-sqlserver-3.2.6.Final-plugin.tar.gz /tmp/
+COPY connect/debezium-libs/debezium-connector-postgres-3.2.6.Final-plugin.tar.gz /tmp/
+COPY connect/debezium-libs/debezium-connector-jdbc-3.2.6.Final-plugin.tar.gz /tmp/
 
-RUN curl -fsSL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-postgres/${DEBEZIUM_VERSION}/debezium-connector-postgres-${DEBEZIUM_VERSION}-plugin.tar.gz" \
-      -o /tmp/debezium-postgres.tar.gz && \
-    tar -xzf /tmp/debezium-postgres.tar.gz -C /usr/share/confluent-hub-components/ && \
-    rm -f /tmp/debezium-postgres.tar.gz
-
-RUN curl -fsSL "https://repo1.maven.org/maven2/io/debezium/debezium-connector-jdbc/${DEBEZIUM_VERSION}/debezium-connector-jdbc-${DEBEZIUM_VERSION}-plugin.tar.gz" \
-      -o /tmp/debezium-jdbc.tar.gz && \
-    tar -xzf /tmp/debezium-jdbc.tar.gz -C /usr/share/confluent-hub-components/ && \
-    rm -f /tmp/debezium-jdbc.tar.gz
+RUN tar -xzf /tmp/debezium-connector-sqlserver-3.2.6.Final-plugin.tar.gz -C /usr/share/confluent-hub-components/ && \
+    tar -xzf /tmp/debezium-connector-postgres-3.2.6.Final-plugin.tar.gz -C /usr/share/confluent-hub-components/ && \
+    tar -xzf /tmp/debezium-connector-jdbc-3.2.6.Final-plugin.tar.gz -C /usr/share/confluent-hub-components/
 
 # Clear proxy so it does not leak into Connect workers at runtime
 ENV JAVA_TOOL_OPTIONS= \

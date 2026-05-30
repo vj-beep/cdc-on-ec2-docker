@@ -35,10 +35,10 @@
     "max.queue.size": "${AURORA_SOURCE_MAX_QUEUE_SIZE}",
     "max.queue.size.in.bytes": "${AURORA_SOURCE_MAX_QUEUE_SIZE_IN_BYTES}",
 
-    "key.converter": "io.confluent.connect.avro.AvroConverter",
-    "key.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
-    "value.converter": "io.confluent.connect.avro.AvroConverter",
-    "value.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true",
 
     "producer.override.linger.ms": "0",
     "producer.override.max.request.size": "${CONNECT_PRODUCER_MAX_REQUEST_SIZE}",
