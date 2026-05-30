@@ -351,17 +351,39 @@ What it does on each node:
 
 ### Phase 4: Build Custom Connect Image
 
+**Standard Approach (Recommended):**
 ```bash
 ./scripts/4-build-connect.sh
 ```
 
 Runs on **Node 4 (connect node)** only:
-- Builds `cdc-poc-connect:${CP_VERSION}` using `connect/Dockerfile`
-- Downloads and installs: Debezium SQL Server, Debezium PostgreSQL, JDBC Sink plugins
+- Builds `cdc-on-ec2-connect:${CP_VERSION}` using `connect/Dockerfile`
+- Downloads and installs: Debezium SQL Server, Debezium PostgreSQL, JDBC Sink plugins, SqlServerCaseRestorer SMT
 - Includes `mssql-jdbc` driver from `connect/jars/`
-- Takes 5-10 minutes (Maven plugin downloads)
+- Debezium connectors pre-cached in `connect/debezium-libs/` to avoid Maven Central rate-limiting
+- Takes 5-10 minutes (Maven SMT compilation + Docker build)
 
-The image stays local on Node 4 — it is not pushed to any registry.
+**Alternative Approaches (Faster for Subsequent Deployments):**
+
+See `DOCKER-BUILD-OPTIONS.md` for three build strategies:
+
+1. **Pre-built image from registry** (~1 minute — fastest)
+   ```bash
+   ./scripts/on-demand-load-connect-image.sh --registry myecr.azurecr.io/cdc-on-ec2-connect:8.0.0
+   ```
+
+2. **Load from tar archive** (~2-3 minutes)
+   ```bash
+   ./scripts/on-demand-save-connect-image.sh                    # After build, save image
+   ./scripts/on-demand-load-connect-image.sh docker-images/cdc-on-ec2-connect-8.0.0.tar.gz  # On next deployment
+   ```
+
+3. **Local build on jumpbox** (with access to Docker + Maven)
+   ```bash
+   ./scripts/4-build-connect.sh --jumpbox
+   ```
+
+The image stays local on Node 4 — it is not pushed to any registry unless you explicitly save/push it using `on-demand-save-connect-image.sh`.
 
 ---
 
