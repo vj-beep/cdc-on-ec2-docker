@@ -38,6 +38,7 @@ connect/smt/.project
 docker-images/
 *.tar.gz
 !connect/debezium-libs/
+!connect/debezium-libs/*.tar.gz
 
 # Docker build logs
 /tmp/docker-build.log
