@@ -76,10 +76,22 @@ Closes connection, caches both mappings in memory
 
 **SqlServerColumnNamingStrategy:**
 ```
-Builds same COLUMN mappings by querying sys.columns
+Connects to SQL Server via JDBC
   ↓
-Caches locally for fast lookup per record
+Queries sys.columns for all tables in dbo schema
+  ↓
+Builds a single flat COLUMN map (no table grouping):
+  {
+    "workitemid" → "workItemId",
+    "dataxml"   → "dataXml",
+    "title"     → "title",
+    "createdat" → "createdAt",
+    "updatedat" → "updatedAt"
+  }
+  ↓
+Closes connection, caches map in memory
 ```
+> Note: Unlike SqlServerCaseRestorer which groups columns per table, this map is flat across all tables. Column names that appear in multiple tables with the same case are merged safely; case collisions (same lowercase name, different case across tables) log a warning.
 
 ### For Each Record (Repeated, No DB Calls)
 ```
