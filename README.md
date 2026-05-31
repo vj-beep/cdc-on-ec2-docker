@@ -409,16 +409,21 @@ See [docs/operations/troubleshooting.md](docs/operations/troubleshooting.md) for
 
 ## Documentation
 
+**🚀 Deployment & Operations:**
 - **[README-DEPLOYMENT.md](README-DEPLOYMENT.md)** ← Start here! Complete step-by-step workflow
-- **[docs/README.md](docs/README.md)** — Documentation index and TOC
-- **[docs/architecture/schema-migration-model.md](docs/architecture/schema-migration-model.md)** — CDC scope, schema migration strategy, and implementation checklist (Confluent & Kafka best practices)
-- **[docs/architecture/topology.md](docs/architecture/topology.md)** — Node roles and service layout
-- **[docs/operations/troubleshooting.md](docs/operations/troubleshooting.md)** — Deep troubleshooting guide
-- **[docs/operations/dlq.md](docs/operations/dlq.md)** — Dead Letter Queue operations and replay
-- **[docs/operations/startup.md](docs/operations/startup.md)** — Expected startup durations per service
-- **[docs/performance/best-practices.md](docs/performance/best-practices.md)** — Performance tuning for snapshot and streaming
-- **[docs/performance/profiles.md](docs/performance/profiles.md)** — Snapshot vs. streaming profile switching
-- **[docs/reference/cheat-sheet.md](docs/reference/cheat-sheet.md)** — Common commands at a glance
+- **[DOCKER-BUILD-OPTIONS.md](DOCKER-BUILD-OPTIONS.md)** — Custom Connect image build strategies (automated, pre-built, offline)
+- **[DOCKER-IMAGE-DEPLOYMENT-GUIDE.md](DOCKER-IMAGE-DEPLOYMENT-GUIDE.md)** — Docker image architecture, contents, and deployment workflows
+
+**📖 Core Documentation:**
+- **[docs/README.md](docs/README.md)** — Full documentation index and TOC
+- **[docs/architecture/](docs/architecture/)** — Architecture guides (connect cluster, topology, schema migration, co-location)
+- **[docs/operations/](docs/operations/)** — Operations guides (startup timelines, DLQ, troubleshooting)
+- **[docs/performance/](docs/performance/)** — Performance guides (tuning, profiles, snapshot parallelization)
+- **[docs/reference/](docs/reference/)** — Quick reference and cheat sheet
+
+**🔧 Advanced Topics:**
+- **[SMT-COLUMN-CASE-MAPPING.md](SMT-COLUMN-CASE-MAPPING.md)** — SqlServerCaseRestorer SMT for reverse-path camelCase column mapping (production-hardened, 600K+ rec/sec)
+- **[docs/architecture/schema-migration-model.md](docs/architecture/schema-migration-model.md)** — CDC scope, schema migration strategy, implementation checklist
 
 ---
 

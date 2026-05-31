@@ -9,13 +9,17 @@ Complete guide to deploying and operating Kafka Connect for bi-directional CDC b
 ### Architecture
 - **[Connect Cluster Design](architecture/connect-cluster.md)** — Kafka Connect platform design for scale (100s of databases, 1000s of tables). Worker/task/connector hierarchy, segmentation, and HA patterns.
 - **[Topology & Node Distribution](architecture/topology.md)** — Multi-node EC2 deployment topology. Broker placement, Connect worker distribution, and network design.
+- **[Schema Migration Model](architecture/schema-migration-model.md)** — Forward and reverse CDC table schema synchronization, asymmetric auto-create strategy.
+- **[Co-location Best Practices](architecture/colocaton-best-practices.md)** — Kafka broker and Connect worker placement strategies for availability and performance.
 
 ### Configuration
 - **[Environment Management](configuration/environment.md)** — `.env` variable setup, template defaults, and profile switching (snapshot vs. streaming).
 
 ### Performance & Tuning
+- **[Performance Fundamentals](performance/PERFORMANCE.md)** — Throughput targets, latency profiles, resource estimation for TB-scale CDC.
 - **[Tuning Best Practices](performance/best-practices.md)** — Connector-specific tuning for throughput, latency, and resource efficiency. Snapshot vs. streaming profiles.
 - **[Tuning Profiles](performance/profiles.md)** — Predefined `.env` profiles for different workloads (snapshot, streaming). Quick profile switching.
+- **[Snapshot Parallelization](performance/snapshot-parallelization.md)** — Parallel table capture strategies for faster initial sync.
 
 ### Operations
 - **[Startup & Initialization](operations/startup.md)** — Deployment phases (0-7), expected timelines, and validation checkpoints.
