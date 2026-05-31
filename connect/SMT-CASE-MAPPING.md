@@ -18,23 +18,19 @@ The connector has `auto.create=true` and `auto.evolve=true` for POC convenience.
 
 ⚠️ **Why?** Auto-creation can silently create unwanted indexes, constraints, or data types that don't match your schema governance requirements.
 
-## How It Works
+## Architecture
 
-We use two custom components to automatically rename columns during replication:
+Three components work together:
 
-### 1. SqlServerCaseRestorer (SMT — Simple Message Transform)
-Runs on each Kafka record before it reaches the SQL Server sink. It:
-- Queries SQL Server to discover the actual column names in your tables
-- Renames Kafka record fields from lowercase (`workitemid`) → camelCase (`workItemId`)
-- Renames the **record's topic field** (used for routing) to match the SQL Server table name (the actual Kafka topic `aurora.public.workitemdata` in Control Center remains unchanged)
+| Component | Role | Where it runs |
+|---|---|---|
+| `SqlServerSchemaCache` | Shared static cache — one JDBC call loads all metadata | JVM-level singleton |
+| `SqlServerCaseRestorer` | Renames record fields + topic routing | Kafka Connect SMT chain |
+| `SqlServerColumnNamingStrategy` | Resolves columns in Debezium's internal validation path | Debezium JDBC sink |
 
-### 2. SqlServerColumnNamingStrategy (Naming Strategy)
-Operates inside Debezium's schema validation. When Debezium checks if a column exists, it:
-- Receives the lowercase column name from Aurora (`workitemid`)
-- Looks up the actual camelCase name from SQL Server (`workItemId`)
-- Returns the correct name so the column is found in the target table
+All three are compiled into one JAR: `connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar`
 
-### Why Both Components Are Needed
+### Why Both SMT and NamingStrategy Are Needed
 
 The SMT renames fields in the Kafka record payload — the sink sees `workItemId` in the data. But the JDBC sink has a **second independent code path**: `resolveMissingFields()` reads column names from the schema metadata parameter `__debezium.source.column.name`, which is embedded by the Debezium PostgreSQL source connector and **always contains Aurora's lowercase name regardless of what the SMT renamed**. This value never passes through the SMT chain.
 
@@ -46,54 +42,35 @@ Without `SqlServerColumnNamingStrategy`, even with the SMT running:
 
 The naming strategy intercepts step 3 and returns `workItemId` instead, so `hasColumn()` succeeds.
 
-### 3. Required Setting: `quote.identifiers=true`
-This tells SQL Server to accept and preserve camelCase names in brackets (e.g., `[workItemId]`). Without it, SQL Server lowercases all identifiers and the column names still won't match.
+### Required Setting: `quote.identifiers=true`
 
-## Example Data Flow
+This tells the JDBC sink to bracket-quote identifiers (e.g., `[workItemId]`). Without it, Debezium's dialect lowercases the resolved name before the `hasColumn()` check, undoing the fix.
 
-### Startup (One-Time)
+## How It Works
 
-**SqlServerCaseRestorer:**
+### Startup (One-Time, Shared)
+
+Whichever component initializes first (SMT or NamingStrategy) triggers a single JDBC call. The second component reuses the already-loaded cache entry — no duplicate query.
+
 ```
-Connects to SQL Server via JDBC
+SqlServerSchemaCache.get(jdbcUrl, user, password, schema)
   ↓
-Queries sys.tables and sys.columns for dbo schema
+Connects to SQL Server via JDBC (30s query timeout)
   ↓
-Builds TABLE mapping:
-  { "workitemdata" → "workItemData" }  ← lowercase table name → actual case
+Single query: SELECT t.name, c.name FROM sys.tables JOIN sys.columns
   ↓
-Builds COLUMN mappings (per table):
-  "workitemdata" → {
-    "workitemid" → "workItemId",
-    "dataxml" → "dataXml",
-    "title" → "title",        ← already matches, still cached
-    "createdat" → "createdAt",
-    "updatedat" → "updatedAt"
-  }
+Builds atomic Snapshot:
+  TABLE map:    { "workitemdata" → "workItemData" }
+  COLUMN maps:  { "workitemdata" → { "workitemid"→"workItemId", "dataxml"→"dataXml", ... } }
+  FLAT map:     { "workitemid"→"workItemId", "dataxml"→"dataXml", ... }
   ↓
-Closes connection, caches both mappings in memory
+Publishes snapshot via single volatile write (no torn reads)
+  ↓
+Closes connection
 ```
 
-**SqlServerColumnNamingStrategy:**
-```
-Connects to SQL Server via JDBC
-  ↓
-Queries sys.columns for all tables in dbo schema
-  ↓
-Builds a single flat COLUMN map (no table grouping):
-  {
-    "workitemid" → "workItemId",
-    "dataxml"   → "dataXml",
-    "title"     → "title",
-    "createdat" → "createdAt",
-    "updatedat" → "updatedAt"
-  }
-  ↓
-Closes connection, caches map in memory
-```
-> Note: Unlike SqlServerCaseRestorer which groups columns per table, this map is flat across all tables. Column names that appear in multiple tables with the same case are merged safely; case collisions (same lowercase name, different case across tables) log a warning.
+### For Each Record (No DB Calls)
 
-### For Each Record (Repeated, No DB Calls)
 ```
 1. INSERT into Aurora
    workitemdata: { workitemid=99001, title="Test", dataxml="<x/>" }
@@ -101,32 +78,53 @@ Closes connection, caches map in memory
 2. Debezium publishes to Kafka topic: aurora.public.workitemdata
    Record fields: workitemid, title, dataxml (all lowercase)
 
-3. RegexRouter extracts: workitemdata
+3. RegexRouter extracts table name: workitemdata
 
-4. SqlServerCaseRestorer (SMT) — uses cached TABLE mapping:
-   Looks up "workitemdata" → "workItemData"
+4. SqlServerCaseRestorer (SMT) — reads from cached snapshot:
+   TABLE lookup: "workitemdata" → "workItemData"
    Record topic field becomes: workItemData (for sink routing)
    
-   Also uses cached COLUMN mappings:
+   COLUMN lookup (per-table map):
    workitemid → workItemId, dataxml → dataXml
    Record fields renamed: { workItemId=99001, title="Test", dataXml="<x/>" }
 
 5. Debezium JDBC Sink processes record:
    
-   SqlServerColumnNamingStrategy — uses cached COLUMN mapping:
-   When sink validates columns, strategy looks up each field name:
+   SqlServerColumnNamingStrategy — reads from same cached snapshot (flat map):
+   When sink validates columns via __debezium.source.column.name:
    "workitemid" → "workItemId" (matches target table) ✓
    "dataxml" → "dataXml" (matches target table) ✓
    "title" → "title" (already matches) ✓
    
    Sink writes to SQL Server:
-   Table: dbo.workItemData (from SMT-renamed topic)
-   INSERT INTO [workItemData] ([workItemId], [title], [dataXml]) 
+   Table: dbo.[workItemData] (from SMT-renamed topic)
+   INSERT INTO [workItemData] ([workItemId], [title], [dataXml])
    VALUES (99001, 'Test', '<x/>')
 
 6. Result in SQL Server
    dbo.workItemData: { workItemId=99001, title="Test", dataXml="<x/>" } ✓
 ```
+
+### Schema Evolution (Reload-on-Miss)
+
+When a new column or table is added to SQL Server after the connector starts:
+
+```
+Record arrives with unknown field "newcolumn"
+  ↓
+Cache lookup: miss
+  ↓
+reloadOnMiss() checks:
+  - Field starts with "__"? → skip (Debezium internal metadata)
+  - Cooldown elapsed (60s)? → if no, skip
+  - CAS wins the race? → if no, skip (another thread is reloading)
+  ↓
+Re-queries SQL Server, publishes new atomic snapshot
+  ↓
+Caller retries lookup → "newcolumn" → "newColumn" ✓
+```
+
+If the reload fails (transient network error), the error is **logged and swallowed** — the stale cache remains valid and the connector task stays alive.
 
 ## How to Enable It
 
@@ -147,6 +145,18 @@ CREATE PUBLICATION cdc_publication FOR ALL TABLES;
 
 **No additional setup is needed.** The deployment scripts handle everything automatically.
 
+## Production Characteristics
+
+| Aspect | Behavior |
+|---|---|
+| **Hot-path allocation** | 1 Struct per record (renamed fields). No map lookups, no String construction after warmup. |
+| **Schema cache** | Identity-keyed by Schema instance. Bounded to 1024 entries, auto-flushes on overflow. |
+| **JDBC calls** | 1 at startup (shared). Additional calls only on cache miss, at most 1 per 60 seconds. |
+| **Thread safety** | Atomic snapshot publish via volatile. CAS-based reload cooldown. ConcurrentHashMap for schema cache. |
+| **Failure handling** | Reload errors logged + swallowed. Task never crashes from a transient SQL Server blip. |
+| **Query timeout** | 30 seconds. Prevents indefinite blocking during SQL Server lock contention. |
+| **Throughput** | Tested at 200K+ records/sec (1M record benchmark). |
+
 ## Troubleshooting
 
 **"Cannot ALTER table because field is not optional but has no default value"**
@@ -159,5 +169,13 @@ CREATE PUBLICATION cdc_publication FOR ALL TABLES;
 - → If not active, restart the connector: `curl -X POST http://localhost:8084/connectors/debezium-postgres-source/restart`
 
 **Column names still lowercase in SQL Server**
-- → Check the smit JAR was loaded: `curl http://localhost:8083/connectors/jdbc-sink-sqlserver | jq '.config["transforms"]'`
+- → Check the SMT JAR was loaded: `curl http://localhost:8084/connectors/jdbc-sink-sqlserver | jq '.config["transforms"]'`
 - → Should include `caseRestorer`
+
+**"cached 0 column name mappings" in Connect logs**
+- → JDBC credentials lack SELECT permission on sys.columns
+- → Or `table.schema` config doesn't match the SQL Server schema (default: `dbo`)
+
+**New column not picked up after schema change**
+- → Wait up to 60 seconds — reload-on-miss will auto-detect it
+- → Or restart the connector task: `POST /connectors/jdbc-sink-sqlserver/tasks/0/restart`
