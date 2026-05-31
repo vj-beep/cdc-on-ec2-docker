@@ -45,7 +45,14 @@ class SqlServerCaseRestorerTest {
 
     @BeforeEach
     void setUp() {
+        // Clear shared static cache so each test starts with a fresh entry
+        SqlServerSchemaCache.CACHE.clear();
         smt = new SqlServerCaseRestorer<>();
+        // Pre-wire a cache entry so tests can inject maps without a real DB.
+        // Pin lastReloadAttempt to suppress reload-on-miss (no SQL Server in test env).
+        smt.cacheEntry = new SqlServerSchemaCache.Entry(
+            "jdbc:sqlserver://localhost:1433;databaseName=testdb;encrypt=false", "sa", "", "dbo");
+        smt.cacheEntry.lastReloadAttempt.set(Long.MAX_VALUE - SqlServerSchemaCache.RELOAD_COOLDOWN_MS);
     }
 
     @AfterEach
@@ -57,9 +64,11 @@ class SqlServerCaseRestorerTest {
 
     /** Inject table map directly — bypasses configure() so no real DB required. */
     private void seed(String... pairs) {
+        Map<String, String> tableMap = new HashMap<>(smt.cacheEntry.tableCaseMap);
         for (int i = 0; i < pairs.length; i += 2) {
-            smt.tableCaseMap.put(pairs[i].toLowerCase(), pairs[i + 1]);
+            tableMap.put(pairs[i].toLowerCase(), pairs[i + 1]);
         }
+        smt.cacheEntry.tableCaseMap = tableMap;
     }
 
     private SinkRecord record(String topic) {
@@ -241,11 +250,11 @@ class SqlServerCaseRestorerTest {
                 smt.configure(configProps());
             }
 
-            assertEquals("FlagSet",  smt.tableCaseMap.get("flagset"));
-            assertEquals("workItem", smt.tableCaseMap.get("workitem"));
-            assertEquals(2, smt.tableCaseMap.size());
-            assertEquals("workItemId", smt.columnCaseMaps.get("workitem").get("workitemid"));
-            assertEquals("name",       smt.columnCaseMaps.get("flagset").get("name"));
+            assertEquals("FlagSet",  smt.cacheEntry.tableCaseMap.get("flagset"));
+            assertEquals("workItem", smt.cacheEntry.tableCaseMap.get("workitem"));
+            assertEquals(2, smt.cacheEntry.tableCaseMap.size());
+            assertEquals("workItemId", smt.cacheEntry.columnCaseMaps.get("workitem").get("workitemid"));
+            assertEquals("name",       smt.cacheEntry.columnCaseMaps.get("flagset").get("name"));
         }
 
         @Test
@@ -259,18 +268,19 @@ class SqlServerCaseRestorerTest {
                 dm.when(() -> DriverManager.getConnection(anyString(), anyString(), anyString()))
                   .thenThrow(sqlEx);
 
-                assertThrows(org.apache.kafka.common.config.ConfigException.class,
+                assertThrows(RuntimeException.class,
                     () -> smt.configure(configProps()));
             }
         }
 
         @Test
-        @DisplayName("close() clears the table map")
+        @DisplayName("close() clears the schema cache but not the shared entry")
         void closeClears() {
             seed("flagset", "FlagSet");
-            assertEquals(1, smt.tableCaseMap.size());
+            assertEquals(1, smt.cacheEntry.tableCaseMap.size());
             smt.close();
-            assertEquals(0, smt.tableCaseMap.size());
+            // Shared cache entry is not cleared by close() — it belongs to SqlServerSchemaCache
+            assertEquals(1, smt.cacheEntry.tableCaseMap.size());
         }
     }
 
@@ -285,7 +295,9 @@ class SqlServerCaseRestorerTest {
             for (int i = 0; i < pairs.length; i += 2) {
                 colMap.put(pairs[i].toLowerCase(), pairs[i + 1]);
             }
-            smt.columnCaseMaps.put(tableLower, colMap);
+            Map<String, Map<String, String>> colMaps = new HashMap<>(smt.cacheEntry.columnCaseMaps);
+            colMaps.put(tableLower, colMap);
+            smt.cacheEntry.columnCaseMaps = colMaps;
         }
 
         private SinkRecord structRecord(String topic, Schema valueSchema, Struct value) {
@@ -414,15 +426,19 @@ class SqlServerCaseRestorerTest {
         @DisplayName("Processes 1M records in < 5s (200K+ rec/sec) — proves no latency concern at TB scale")
         void millionRecordThroughput() {
             // Simulate 50 tables with 10 columns each
+            Map<String, String> tableMap = new HashMap<>();
+            Map<String, Map<String, String>> colMaps = new HashMap<>();
             for (int t = 0; t < 50; t++) {
                 String tableName = "table" + t;
-                smt.tableCaseMap.put(tableName, "Table" + t);
+                tableMap.put(tableName, "Table" + t);
                 Map<String, String> colMap = new HashMap<>();
                 for (int c = 0; c < 10; c++) {
                     colMap.put("column" + c, "Column" + c);
                 }
-                smt.columnCaseMaps.put(tableName, colMap);
+                colMaps.put(tableName, colMap);
             }
+            smt.cacheEntry.tableCaseMap = tableMap;
+            smt.cacheEntry.columnCaseMaps = colMaps;
 
             Schema valueSchema = SchemaBuilder.struct().name("test.value")
                 .field("column0", Schema.INT64_SCHEMA)

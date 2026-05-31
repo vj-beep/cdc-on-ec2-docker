@@ -12,14 +12,8 @@ import org.apache.kafka.connect.transforms.util.SimpleConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -79,12 +73,8 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
                 ConfigDef.Importance.MEDIUM,
                 "SQL Server schema to scan for table names. Default: dbo");
 
-    private static final int CONNECT_TIMEOUT_SECONDS = 30;
-
-    // Package-private so unit tests can inject the maps without a real DB.
-    final Map<String, String> tableCaseMap = new HashMap<>();
-    // Nested map: tableName (lowercase) -> {columnName (lowercase) -> actual}
-    final Map<String, Map<String, String>> columnCaseMaps = new HashMap<>();
+    // Package-private so unit tests can inject a pre-populated entry without a real DB.
+    SqlServerSchemaCache.Entry cacheEntry;
 
     /**
      * Pairs a renamed Schema with the pre-computed field-name list so both are built once
@@ -107,73 +97,15 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
 
     @Override
     public void configure(Map<String, ?> props) {
-        SimpleConfig config   = new SimpleConfig(CONFIG_DEF, props);
-        String       jdbcUrl  = config.getString(JDBC_URL_CONFIG);
-        String       user     = config.getString(JDBC_USER_CONFIG);
-        String       password = config.getPassword(JDBC_PASS_CONFIG).value();
-        String       schema   = config.getString(SCHEMA_CONFIG);
+        SimpleConfig config  = new SimpleConfig(CONFIG_DEF, props);
+        String jdbcUrl       = config.getString(JDBC_URL_CONFIG);
+        String user          = config.getString(JDBC_USER_CONFIG);
+        String password      = config.getPassword(JDBC_PASS_CONFIG).value();
+        String schema        = config.getString(SCHEMA_CONFIG);
 
-        log.info("SqlServerCaseRestorer: loading table and column names from schema '{}' via {}",
-                 schema, jdbcUrl);
-        loadMetadata(jdbcUrl, user, password, schema);
-        log.info("SqlServerCaseRestorer: cached {} table name mappings and {} column mappings",
-                 tableCaseMap.size(), columnCaseMaps.size());
-    }
-
-    private Connection getConnection(String jdbcUrl, String user, String password) throws SQLException {
-        DriverManager.setLoginTimeout(CONNECT_TIMEOUT_SECONDS);
-        return DriverManager.getConnection(jdbcUrl, user, password);
-    }
-
-    /** Single JDBC round-trip loads both table names and column names. */
-    private void loadMetadata(String jdbcUrl, String user, String password, String schema) {
-        final String sql =
-            "SELECT t.name AS table_name, c.name AS column_name " +
-            "FROM sys.tables t " +
-            "INNER JOIN sys.schemas s ON t.schema_id = s.schema_id " +
-            "INNER JOIN sys.columns c ON t.object_id = c.object_id " +
-            "WHERE s.name = ? " +
-            "  AND t.is_ms_shipped = 0 " +
-            "ORDER BY t.name, c.column_id";
-
-        try (Connection conn = getConnection(jdbcUrl, user, password);
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, schema);
-            try (ResultSet rs = ps.executeQuery()) {
-                String currentTable = null;
-                Map<String, String> currentMap = null;
-
-                while (rs.next()) {
-                    String tableName  = rs.getString("table_name");
-                    String columnName = rs.getString("column_name");
-
-                    if (!tableName.equals(currentTable)) {
-                        currentTable = tableName;
-                        String lower = tableName.toLowerCase(Locale.ROOT);
-                        String prev  = tableCaseMap.put(lower, tableName);
-                        if (prev != null && !prev.equals(tableName)) {
-                            log.warn("SqlServerCaseRestorer: table case collision '{}': " +
-                                     "'{}' overwritten by '{}'.", lower, prev, tableName);
-                        }
-                        currentMap = new HashMap<>();
-                        columnCaseMaps.put(lower, currentMap);
-                    }
-
-                    String lower = columnName.toLowerCase(Locale.ROOT);
-                    String prev  = currentMap.put(lower, columnName);
-                    if (prev != null && !prev.equals(columnName)) {
-                        log.warn("SqlServerCaseRestorer: column case collision in '{}': " +
-                                 "key '{}': '{}' overwritten by '{}'.",
-                                 currentTable, lower, prev, columnName);
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            throw new ConfigException(
-                "SqlServerCaseRestorer: failed to load metadata from SQL Server: " +
-                e.getMessage(), e);
-        }
+        cacheEntry = SqlServerSchemaCache.get(jdbcUrl, user, password, schema);
+        log.info("SqlServerCaseRestorer: using shared schema cache ({} tables) for schema '{}' via {}",
+                 cacheEntry.tableCaseMap.size(), schema, jdbcUrl);
     }
 
     @Override
@@ -187,7 +119,10 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
         String tail = (lastDot >= 0) ? topic.substring(lastDot + 1) : topic;
         String tailLower = tail.toLowerCase(Locale.ROOT);
 
-        String actualTable = tableCaseMap.get(tailLower);
+        String actualTable = cacheEntry.tableCaseMap.get(tailLower);
+        if (actualTable == null && cacheEntry.reloadOnMiss(tailLower)) {
+            actualTable = cacheEntry.tableCaseMap.get(tailLower);
+        }
 
         String newTopic = topic;
         if (actualTable != null && !actualTable.equals(tail)) {
@@ -195,7 +130,7 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
             log.debug("SqlServerCaseRestorer: table topic {} -> {}", topic, newTopic);
         }
 
-        Map<String, String> columnMap = columnCaseMaps.get(tailLower);
+        Map<String, String> columnMap = cacheEntry.columnCaseMaps.get(tailLower);
 
         Object newValue = record.value();
         if (record.value() instanceof Struct && columnMap != null && !columnMap.isEmpty()) {
@@ -280,8 +215,7 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
 
     @Override
     public void close() {
-        tableCaseMap.clear();
-        columnCaseMaps.clear();
         schemaCache.clear();
+        // cacheEntry is shared — do not clear it here
     }
 }

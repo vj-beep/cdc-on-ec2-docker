@@ -35,6 +35,8 @@ class SqlServerColumnNamingStrategyTest {
     @BeforeEach
     void setUp() {
         strategy = new SqlServerColumnNamingStrategy();
+        // Clear shared static cache between tests so each test gets a fresh entry
+        SqlServerSchemaCache.CACHE.clear();
     }
 
     private Map<String, String> configProps() {
@@ -53,6 +55,7 @@ class SqlServerColumnNamingStrategyTest {
         when(conn.prepareStatement(anyString())).thenReturn(ps);
         when(ps.executeQuery()).thenReturn(rs);
         when(rs.next()).thenReturn(true, true, true, false);
+        when(rs.getString("table_name")).thenReturn("workItemData", "workItemData", "workItemData");
         when(rs.getString("column_name")).thenReturn("workItemId", "dataXml", "createdAt");
 
         try (MockedStatic<DriverManager> dm = mockStatic(DriverManager.class)) {
@@ -79,6 +82,8 @@ class SqlServerColumnNamingStrategyTest {
             strategy.configure(configProps());
         }
 
+        // Suppress reload-on-miss — no SQL Server in test env
+        strategy.cacheEntry.lastReloadAttempt.set(Long.MAX_VALUE - SqlServerSchemaCache.RELOAD_COOLDOWN_MS);
         assertEquals("unknownfield", strategy.resolveColumnName("unknownfield"));
     }
 

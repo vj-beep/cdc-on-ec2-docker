@@ -4,12 +4,6 @@ import io.debezium.connector.jdbc.naming.ColumnNamingStrategy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 
@@ -18,12 +12,15 @@ import java.util.Map;
  * to their original camelCase SQL Server column names.
  *
  * Problem: Debezium JDBC sink bypasses SMT transformations when building its internal
- * JdbcSinkRecord — it reads the original pre-SMT Kafka record. So SMT-based column
- * renaming never reaches Debezium's column lookup. This strategy hooks directly into
- * the Debezium column resolution path.
+ * JdbcSinkRecord — it reads the original pre-SMT Kafka record's schema metadata
+ * (__debezium.source.column.name), which always contains Aurora's lowercase column name.
+ * So SMT-based column renaming never reaches Debezium's column lookup. This strategy
+ * hooks directly into the Debezium column resolution path.
  *
- * At startup, queries SQL Server sys.columns to build a lowercase→actual-case map.
- * resolveColumnName("workitemid") → "workItemId"
+ * Uses SqlServerSchemaCache so metadata is shared with SqlServerCaseRestorer —
+ * only one JDBC call is made at startup regardless of which component initialises first.
+ * On a cache miss (new column added after startup), reloadOnMiss() re-queries SQL Server
+ * once per 60 seconds to handle schema evolution without a connector restart.
  *
  * Config (set on the JDBC sink connector):
  *   column.naming.strategy=com.example.kafka.connect.transforms.SqlServerColumnNamingStrategy
@@ -41,8 +38,8 @@ public class SqlServerColumnNamingStrategy implements ColumnNamingStrategy {
     static final String JDBC_PASS_KEY = "column.naming.strategy.jdbc.password";
     static final String SCHEMA_KEY    = "column.naming.strategy.table.schema";
 
-    // lowercase -> actual case for all columns across all tables in the schema
-    private final Map<String, String> columnCaseMap = new HashMap<>();
+    // Package-private so tests can suppress reload-on-miss
+    SqlServerSchemaCache.Entry cacheEntry;
 
     @Override
     public void configure(Map<String, String> props) {
@@ -57,46 +54,22 @@ public class SqlServerColumnNamingStrategy implements ColumnNamingStrategy {
             return;
         }
 
-        log.info("SqlServerColumnNamingStrategy: loading column names from schema '{}' via {}", schema, jdbcUrl);
-        loadColumnMap(jdbcUrl, user, password, schema);
-        log.info("SqlServerColumnNamingStrategy: cached {} column name mappings", columnCaseMap.size());
-    }
-
-    private void loadColumnMap(String jdbcUrl, String user, String password, String schema) {
-        final String sql =
-            "SELECT c.name AS column_name " +
-            "FROM sys.tables t " +
-            "INNER JOIN sys.schemas s ON t.schema_id = s.schema_id " +
-            "INNER JOIN sys.columns c ON t.object_id = c.object_id " +
-            "WHERE s.name = ? AND t.is_ms_shipped = 0";
-
-        DriverManager.setLoginTimeout(30);
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, user, password);
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, schema);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    String actual = rs.getString("column_name");
-                    String lower  = actual.toLowerCase(Locale.ROOT);
-                    String prev   = columnCaseMap.put(lower, actual);
-                    if (prev != null && !prev.equals(actual)) {
-                        log.warn("SqlServerColumnNamingStrategy: case collision for '{}': " +
-                                 "'{}' overwritten by '{}'", lower, prev, actual);
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            throw new RuntimeException(
-                "SqlServerColumnNamingStrategy: failed to load column metadata from SQL Server: " +
-                e.getMessage(), e);
-        }
+        cacheEntry = SqlServerSchemaCache.get(jdbcUrl, user, password, schema);
+        log.info("SqlServerColumnNamingStrategy: using shared schema cache ({} columns) for schema '{}' via {}",
+                 cacheEntry.flatColumnMap.size(), schema, jdbcUrl);
     }
 
     @Override
     public String resolveColumnName(String fieldName) {
-        if (fieldName == null) return fieldName;
-        String resolved = columnCaseMap.get(fieldName.toLowerCase(Locale.ROOT));
+        if (fieldName == null || cacheEntry == null) return fieldName;
+
+        String lower    = fieldName.toLowerCase(Locale.ROOT);
+        String resolved = cacheEntry.flatColumnMap.get(lower);
+
+        if (resolved == null && cacheEntry.reloadOnMiss(fieldName)) {
+            resolved = cacheEntry.flatColumnMap.get(lower);
+        }
+
         if (resolved != null && !resolved.equals(fieldName)) {
             log.debug("SqlServerColumnNamingStrategy: resolved '{}' -> '{}'", fieldName, resolved);
             return resolved;
