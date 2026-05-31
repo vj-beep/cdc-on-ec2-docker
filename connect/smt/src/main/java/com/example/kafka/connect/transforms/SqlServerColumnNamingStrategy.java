@@ -10,6 +10,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -69,6 +70,7 @@ public class SqlServerColumnNamingStrategy implements ColumnNamingStrategy {
             "INNER JOIN sys.columns c ON t.object_id = c.object_id " +
             "WHERE s.name = ? AND t.is_ms_shipped = 0";
 
+        DriverManager.setLoginTimeout(30);
         try (Connection conn = DriverManager.getConnection(jdbcUrl, user, password);
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
@@ -76,7 +78,7 @@ public class SqlServerColumnNamingStrategy implements ColumnNamingStrategy {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String actual = rs.getString("column_name");
-                    String lower  = actual.toLowerCase();
+                    String lower  = actual.toLowerCase(Locale.ROOT);
                     String prev   = columnCaseMap.put(lower, actual);
                     if (prev != null && !prev.equals(actual)) {
                         log.warn("SqlServerColumnNamingStrategy: case collision for '{}': " +
@@ -85,14 +87,16 @@ public class SqlServerColumnNamingStrategy implements ColumnNamingStrategy {
                 }
             }
         } catch (SQLException e) {
-            log.error("SqlServerColumnNamingStrategy: failed to load column metadata: {}", e.getMessage(), e);
+            throw new RuntimeException(
+                "SqlServerColumnNamingStrategy: failed to load column metadata from SQL Server: " +
+                e.getMessage(), e);
         }
     }
 
     @Override
     public String resolveColumnName(String fieldName) {
         if (fieldName == null) return fieldName;
-        String resolved = columnCaseMap.get(fieldName.toLowerCase());
+        String resolved = columnCaseMap.get(fieldName.toLowerCase(Locale.ROOT));
         if (resolved != null && !resolved.equals(fieldName)) {
             log.debug("SqlServerColumnNamingStrategy: resolved '{}' -> '{}'", fieldName, resolved);
             return resolved;

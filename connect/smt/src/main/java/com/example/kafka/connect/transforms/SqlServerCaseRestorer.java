@@ -20,6 +20,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -77,6 +78,8 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
                 ConfigDef.Importance.MEDIUM,
                 "SQL Server schema to scan for table names. Default: dbo");
 
+    private static final int CONNECT_TIMEOUT_SECONDS = 30;
+
     // Package-private so unit tests can inject the maps without a real DB.
     final Map<String, String> tableCaseMap = new HashMap<>();
     // Nested map: tableName (lowercase) -> {columnName (lowercase) -> actual}
@@ -107,11 +110,12 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
                  tableCaseMap.size(), columnCaseMaps.size());
     }
 
+    private Connection getConnection(String jdbcUrl, String user, String password) throws SQLException {
+        DriverManager.setLoginTimeout(CONNECT_TIMEOUT_SECONDS);
+        return DriverManager.getConnection(jdbcUrl, user, password);
+    }
+
     private void loadTableMap(String jdbcUrl, String user, String password, String schema) {
-        // Why sys.tables instead of INFORMATION_SCHEMA.TABLES:
-        //   INFORMATION_SCHEMA is limited to tables visible to the current user's default
-        //   collation. sys.tables with an explicit COLLATE clause is authoritative and
-        //   works correctly even when the DB collation is case-insensitive (CI).
         final String sql =
             "SELECT t.name AS table_name " +
             "FROM sys.tables t " +
@@ -119,14 +123,14 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
             "WHERE s.name = ? " +
             "  AND t.is_ms_shipped = 0";
 
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, user, password);
+        try (Connection conn = getConnection(jdbcUrl, user, password);
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, schema);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String actual = rs.getString("table_name");
-                    String lower  = actual.toLowerCase();
+                    String lower  = actual.toLowerCase(Locale.ROOT);
                     String prev   = tableCaseMap.put(lower, actual);
                     if (prev != null && !prev.equals(actual)) {
                         log.warn("SqlServerCaseRestorer: case collision for key '{}': " +
@@ -152,7 +156,7 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
             "  AND t.is_ms_shipped = 0 " +
             "ORDER BY t.name, c.column_id";
 
-        try (Connection conn = DriverManager.getConnection(jdbcUrl, user, password);
+        try (Connection conn = getConnection(jdbcUrl, user, password);
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setString(1, schema);
@@ -167,10 +171,10 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
                     if (!tableName.equals(currentTable)) {
                         currentTable = tableName;
                         currentMap = new HashMap<>();
-                        columnCaseMaps.put(tableName.toLowerCase(), currentMap);
+                        columnCaseMaps.put(tableName.toLowerCase(Locale.ROOT), currentMap);
                     }
 
-                    String lower = columnName.toLowerCase();
+                    String lower = columnName.toLowerCase(Locale.ROOT);
                     String prev  = currentMap.put(lower, columnName);
                     if (prev != null && !prev.equals(columnName)) {
                         log.warn("SqlServerCaseRestorer: case collision for column in table '{}': " +
@@ -196,7 +200,7 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
         String[] parts = topic.split("\\.", -1);
 
         String tail        = parts[parts.length - 1];
-        String actualTable = tableCaseMap.get(tail.toLowerCase());
+        String actualTable = tableCaseMap.get(tail.toLowerCase(Locale.ROOT));
 
         String newTopic = topic;
         if (actualTable != null && !actualTable.equals(tail)) {
@@ -205,7 +209,7 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
             log.debug("SqlServerCaseRestorer: table topic {} -> {}", topic, newTopic);
         }
 
-        String tableLower = (actualTable != null ? actualTable : tail).toLowerCase();
+        String tableLower = (actualTable != null ? actualTable : tail).toLowerCase(Locale.ROOT);
         Map<String, String> columnMap = columnCaseMaps.get(tableLower);
 
         Object newValue = record.value();
@@ -259,14 +263,15 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
         }
 
         List<Field> sourceFields = struct.schema().fields();
-        // Include field count in the key so any column addition busts the cache.
-        String cacheKey = struct.schema().name() + ":" + sourceFields.size();
+        String schemaName = struct.schema().name();
+        if (schemaName == null) schemaName = "_anonymous_";
+        String cacheKey = schemaName + ":" + sourceFields.size();
 
         Schema cachedSchema = renamedSchemaCache.computeIfAbsent(cacheKey, k -> {
             SchemaBuilder builder = SchemaBuilder.struct().name(struct.schema().name());
             if (struct.schema().isOptional()) builder.optional();
             for (Field field : sourceFields) {
-                String actual  = columnMap.get(field.name().toLowerCase());
+                String actual  = columnMap.get(field.name().toLowerCase(Locale.ROOT));
                 String renamed = (actual != null) ? actual : field.name();
                 if (!renamed.equals(field.name())) {
                     log.debug("SqlServerCaseRestorer: renaming field '{}' -> '{}'", field.name(), renamed);
@@ -279,7 +284,7 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
         List<String> cachedRenames = renamedFieldsCache.computeIfAbsent(cacheKey, k -> {
             List<String> renames = new ArrayList<>(sourceFields.size());
             for (Field field : sourceFields) {
-                String actual  = columnMap.get(field.name().toLowerCase());
+                String actual  = columnMap.get(field.name().toLowerCase(Locale.ROOT));
                 renames.add((actual != null) ? actual : field.name());
             }
             return renames;

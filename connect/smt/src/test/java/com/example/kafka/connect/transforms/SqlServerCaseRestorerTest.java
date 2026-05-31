@@ -28,6 +28,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mockStatic;
@@ -267,6 +268,136 @@ class SqlServerCaseRestorerTest {
             assertEquals(1, smt.tableCaseMap.size());
             smt.close();
             assertEquals(0, smt.tableCaseMap.size());
+        }
+    }
+
+    // ── column case restoration ─────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Column case restoration")
+    class ColumnCaseRestorationTests {
+
+        private void seedColumns(String tableLower, String... pairs) {
+            Map<String, String> colMap = new HashMap<>();
+            for (int i = 0; i < pairs.length; i += 2) {
+                colMap.put(pairs[i].toLowerCase(), pairs[i + 1]);
+            }
+            smt.columnCaseMaps.put(tableLower, colMap);
+        }
+
+        private SinkRecord structRecord(String topic, Schema valueSchema, Struct value) {
+            Schema keySchema = SchemaBuilder.struct()
+                .field("id", Schema.INT32_SCHEMA).build();
+            Struct key = new Struct(keySchema).put("id", 1);
+            return new SinkRecord(
+                topic, 0, keySchema, key, valueSchema, value,
+                100L, 1000L, TimestampType.CREATE_TIME, new ConnectHeaders()
+            );
+        }
+
+        @Test
+        @DisplayName("Renames struct fields from lowercase to camelCase")
+        void renamesFields() {
+            seed("workitemdata", "workItemData");
+            seedColumns("workitemdata",
+                "workitemid", "workItemId",
+                "dataxml", "dataXml",
+                "createdat", "createdAt");
+
+            Schema schema = SchemaBuilder.struct().name("test.value")
+                .field("workitemid", Schema.INT64_SCHEMA)
+                .field("dataxml", Schema.OPTIONAL_STRING_SCHEMA)
+                .field("createdat", Schema.OPTIONAL_STRING_SCHEMA)
+                .build();
+            Struct value = new Struct(schema)
+                .put("workitemid", 99001L)
+                .put("dataxml", "<test/>")
+                .put("createdat", "2026-01-01");
+
+            SinkRecord out = smt.apply(structRecord("workitemdata", schema, value));
+
+            Struct outValue = (Struct) out.value();
+            assertEquals(99001L, outValue.get("workItemId"));
+            assertEquals("<test/>", outValue.get("dataXml"));
+            assertEquals("2026-01-01", outValue.get("createdAt"));
+            assertEquals("workItemData", out.topic());
+        }
+
+        @Test
+        @DisplayName("Schema is cached — same Schema instance for repeated calls")
+        void schemaCached() {
+            seed("workitemdata", "workItemData");
+            seedColumns("workitemdata", "workitemid", "workItemId");
+
+            Schema schema = SchemaBuilder.struct().name("test.value")
+                .field("workitemid", Schema.INT64_SCHEMA).build();
+            Struct v1 = new Struct(schema).put("workitemid", 1L);
+            Struct v2 = new Struct(schema).put("workitemid", 2L);
+
+            SinkRecord out1 = smt.apply(structRecord("workitemdata", schema, v1));
+            SinkRecord out2 = smt.apply(structRecord("workitemdata", schema, v2));
+
+            assertSame(((Struct) out1.value()).schema(), ((Struct) out2.value()).schema(),
+                "Cached schema should be the same object instance");
+        }
+
+        @Test
+        @DisplayName("Passes through fields with no column mapping unchanged")
+        void unmappedFieldsPassthrough() {
+            seed("workitemdata", "workItemData");
+            seedColumns("workitemdata", "workitemid", "workItemId");
+
+            Schema schema = SchemaBuilder.struct().name("test.value")
+                .field("workitemid", Schema.INT64_SCHEMA)
+                .field("title", Schema.STRING_SCHEMA)
+                .build();
+            Struct value = new Struct(schema)
+                .put("workitemid", 1L)
+                .put("title", "hello");
+
+            SinkRecord out = smt.apply(structRecord("workitemdata", schema, value));
+            Struct outValue = (Struct) out.value();
+            assertEquals(1L, outValue.get("workItemId"));
+            assertEquals("hello", outValue.get("title"));
+        }
+
+        @Test
+        @DisplayName("Also renames key struct fields")
+        void renamesKeyFields() {
+            seed("workitemdata", "workItemData");
+            seedColumns("workitemdata", "workitemid", "workItemId");
+
+            Schema keySchema = SchemaBuilder.struct().name("test.key")
+                .field("workitemid", Schema.INT64_SCHEMA).build();
+            Struct key = new Struct(keySchema).put("workitemid", 99L);
+
+            Schema valueSchema = SchemaBuilder.struct().name("test.value")
+                .field("title", Schema.STRING_SCHEMA).build();
+            Struct value = new Struct(valueSchema).put("title", "test");
+
+            SinkRecord in = new SinkRecord(
+                "workitemdata", 0, keySchema, key, valueSchema, value,
+                100L, 1000L, TimestampType.CREATE_TIME, new ConnectHeaders()
+            );
+            SinkRecord out = smt.apply(in);
+
+            Struct outKey = (Struct) out.key();
+            assertEquals(99L, outKey.get("workItemId"));
+        }
+
+        @Test
+        @DisplayName("Propagates renamed schema on SinkRecord valueSchema()")
+        void renamedSchemaOnRecord() {
+            seed("workitemdata", "workItemData");
+            seedColumns("workitemdata", "workitemid", "workItemId");
+
+            Schema schema = SchemaBuilder.struct().name("test.value")
+                .field("workitemid", Schema.INT64_SCHEMA).build();
+            Struct value = new Struct(schema).put("workitemid", 1L);
+
+            SinkRecord out = smt.apply(structRecord("workitemdata", schema, value));
+
+            assertEquals("workItemId", out.valueSchema().fields().get(0).name());
         }
     }
 
