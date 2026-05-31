@@ -34,6 +34,18 @@ Operates inside Debezium's schema validation. When Debezium checks if a column e
 - Looks up the actual camelCase name from SQL Server (`workItemId`)
 - Returns the correct name so the column is found in the target table
 
+### Why Both Components Are Needed
+
+The SMT renames fields in the Kafka record payload — the sink sees `workItemId` in the data. But the JDBC sink has a **second independent code path**: `resolveMissingFields()` reads column names from the schema metadata parameter `__debezium.source.column.name`, which is embedded by the Debezium PostgreSQL source connector and **always contains Aurora's lowercase name regardless of what the SMT renamed**. This value never passes through the SMT chain.
+
+Without `SqlServerColumnNamingStrategy`, even with the SMT running:
+1. Sink sees `workItemId` in the record payload ✓ (SMT worked)
+2. Sink reads `__debezium.source.column.name = workitemid` from schema metadata
+3. `hasColumn("workitemid")` → false (SQL Server has `workItemId`, not `workitemid`)
+4. Sink tries to ALTER TABLE to add the "missing" column → crash
+
+The naming strategy intercepts step 3 and returns `workItemId` instead, so `hasColumn()` succeeds.
+
 ### 3. Required Setting: `quote.identifiers=true`
 This tells SQL Server to accept and preserve camelCase names in brackets (e.g., `[workItemId]`). Without it, SQL Server lowercases all identifiers and the column names still won't match.
 
