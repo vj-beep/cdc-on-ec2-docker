@@ -224,14 +224,15 @@ class SqlServerCaseRestorerTest {
         }
 
         @Test
-        @DisplayName("Populates table map from sys.tables result set")
+        @DisplayName("Populates table and column maps from merged metadata result set")
         void populatesMapFromResultSet() throws Exception {
             when(conn.prepareStatement(anyString())).thenReturn(ps);
             when(ps.executeQuery()).thenReturn(rs);
-            // Simulate two rows: FlagSet, workItem
-            when(rs.next()).thenReturn(true, true, false);
-            // Column alias must match production code: "table_name" (lowercase)
-            when(rs.getString("table_name")).thenReturn("FlagSet", "workItem");
+            // Single query returns (table_name, column_name) rows ordered by table, column_id.
+            // Two tables: FlagSet(id, name), workItem(workItemId)
+            when(rs.next()).thenReturn(true, true, true, false);
+            when(rs.getString("table_name")).thenReturn("FlagSet", "FlagSet", "workItem");
+            when(rs.getString("column_name")).thenReturn("id", "name", "workItemId");
 
             try (MockedStatic<DriverManager> dm = mockStatic(DriverManager.class)) {
                 dm.when(() -> DriverManager.getConnection(anyString(), anyString(), anyString()))
@@ -243,6 +244,8 @@ class SqlServerCaseRestorerTest {
             assertEquals("FlagSet",  smt.tableCaseMap.get("flagset"));
             assertEquals("workItem", smt.tableCaseMap.get("workitem"));
             assertEquals(2, smt.tableCaseMap.size());
+            assertEquals("workItemId", smt.columnCaseMaps.get("workitem").get("workitemid"));
+            assertEquals("name",       smt.columnCaseMaps.get("flagset").get("name"));
         }
 
         @Test

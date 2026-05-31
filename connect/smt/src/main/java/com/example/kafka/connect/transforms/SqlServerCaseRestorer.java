@@ -18,6 +18,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -41,10 +42,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * Place this SMT *after* any RegexRouter in the transforms chain so it
  * receives only the bare table-name tail, not the full topic prefix.
  *
- * Performance: Renamed Schemas are cached per source schema name so that
- * SchemaBuilder is only invoked once per table, not once per record. At
- * 14,000 records/sec (TB snapshot) this avoids ~56K short-lived allocations
- * per second and the associated young-gen GC pressure.
+ * Performance: Renamed Schemas are cached by the source Schema instance (identity key)
+ * so SchemaBuilder is invoked once per table, not once per record. Metadata is loaded
+ * in a single JDBC round-trip at startup. At 14,000 records/sec the hot path allocates
+ * only one Struct per record — no String keys, no map probes, no SchemaBuilder cost.
  */
 public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transformation<R> {
 
@@ -85,14 +86,24 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
     // Nested map: tableName (lowercase) -> {columnName (lowercase) -> actual}
     final Map<String, Map<String, String>> columnCaseMaps = new HashMap<>();
 
-    // Cache of renamed Schemas keyed by the source schema's name (one Schema object per table,
-    // reused across all records). ConcurrentHashMap because Connect may call apply() from
-    // multiple worker threads on the same SMT instance.
-    private final Map<String, Schema> renamedSchemaCache = new ConcurrentHashMap<>();
+    /**
+     * Pairs a renamed Schema with the pre-computed field-name list so both are built once
+     * and looked up in a single map access on the hot path.
+     */
+    private static final class RenamedSchema {
+        final Schema schema;
+        final List<String> fieldNames; // parallel to schema.fields(), unmodifiable
 
-    // Parallel field-rename list cached alongside each schema: source field name → renamed field name.
-    // Avoids re-doing the columnMap lookup on every record once the schema is cached.
-    private final Map<String, List<String>> renamedFieldsCache = new ConcurrentHashMap<>();
+        RenamedSchema(Schema schema, List<String> fieldNames) {
+            this.schema     = schema;
+            this.fieldNames = fieldNames;
+        }
+    }
+
+    // Keyed by the source Schema instance — Connect reuses the exact same Schema object for
+    // every record of the same table, so identity equality is a perfect key and avoids any
+    // String allocation on the hot path.
+    private final ConcurrentHashMap<Schema, RenamedSchema> schemaCache = new ConcurrentHashMap<>();
 
     @Override
     public void configure(Map<String, ?> props) {
@@ -104,8 +115,7 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
 
         log.info("SqlServerCaseRestorer: loading table and column names from schema '{}' via {}",
                  schema, jdbcUrl);
-        loadTableMap(jdbcUrl, user, password, schema);
-        loadColumnMaps(jdbcUrl, user, password, schema);
+        loadMetadata(jdbcUrl, user, password, schema);
         log.info("SqlServerCaseRestorer: cached {} table name mappings and {} column mappings",
                  tableCaseMap.size(), columnCaseMaps.size());
     }
@@ -115,38 +125,8 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
         return DriverManager.getConnection(jdbcUrl, user, password);
     }
 
-    private void loadTableMap(String jdbcUrl, String user, String password, String schema) {
-        final String sql =
-            "SELECT t.name AS table_name " +
-            "FROM sys.tables t " +
-            "INNER JOIN sys.schemas s ON t.schema_id = s.schema_id " +
-            "WHERE s.name = ? " +
-            "  AND t.is_ms_shipped = 0";
-
-        try (Connection conn = getConnection(jdbcUrl, user, password);
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setString(1, schema);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    String actual = rs.getString("table_name");
-                    String lower  = actual.toLowerCase(Locale.ROOT);
-                    String prev   = tableCaseMap.put(lower, actual);
-                    if (prev != null && !prev.equals(actual)) {
-                        log.warn("SqlServerCaseRestorer: case collision for key '{}': " +
-                                 "'{}' overwritten by '{}'. Queries will target '{}'.",
-                                 lower, prev, actual, actual);
-                    }
-                }
-            }
-        } catch (SQLException e) {
-            throw new ConfigException(
-                "SqlServerCaseRestorer: failed to load table metadata from SQL Server: " +
-                e.getMessage(), e);
-        }
-    }
-
-    private void loadColumnMaps(String jdbcUrl, String user, String password, String schema) {
+    /** Single JDBC round-trip loads both table names and column names. */
+    private void loadMetadata(String jdbcUrl, String user, String password, String schema) {
         final String sql =
             "SELECT t.name AS table_name, c.name AS column_name " +
             "FROM sys.tables t " +
@@ -170,22 +150,28 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
 
                     if (!tableName.equals(currentTable)) {
                         currentTable = tableName;
+                        String lower = tableName.toLowerCase(Locale.ROOT);
+                        String prev  = tableCaseMap.put(lower, tableName);
+                        if (prev != null && !prev.equals(tableName)) {
+                            log.warn("SqlServerCaseRestorer: table case collision '{}': " +
+                                     "'{}' overwritten by '{}'.", lower, prev, tableName);
+                        }
                         currentMap = new HashMap<>();
-                        columnCaseMaps.put(tableName.toLowerCase(Locale.ROOT), currentMap);
+                        columnCaseMaps.put(lower, currentMap);
                     }
 
                     String lower = columnName.toLowerCase(Locale.ROOT);
                     String prev  = currentMap.put(lower, columnName);
                     if (prev != null && !prev.equals(columnName)) {
-                        log.warn("SqlServerCaseRestorer: case collision for column in table '{}': " +
-                                 "key '{}': '{}' overwritten by '{}'. Queries will target '{}'.",
-                                 tableName, lower, prev, columnName, columnName);
+                        log.warn("SqlServerCaseRestorer: column case collision in '{}': " +
+                                 "key '{}': '{}' overwritten by '{}'.",
+                                 currentTable, lower, prev, columnName);
                     }
                 }
             }
         } catch (SQLException e) {
             throw new ConfigException(
-                "SqlServerCaseRestorer: failed to load column metadata from SQL Server: " +
+                "SqlServerCaseRestorer: failed to load metadata from SQL Server: " +
                 e.getMessage(), e);
         }
     }
@@ -246,55 +232,44 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
     }
 
     /**
-     * Rebuilds a Struct with camelCase field names, reusing a cached Schema so that
-     * SchemaBuilder is only invoked once per table shape rather than once per record.
+     * Rebuilds a Struct with camelCase field names.
      *
-     * Cache key: "schemaName:fieldCount" — the field count component invalidates the
-     * cache automatically when columns are added (e.g. via auto.evolve on the forward
-     * sink), so the renamed Schema is always in sync with the actual record structure.
+     * Cache key: the source Schema instance itself. Connect reuses the exact same Schema
+     * object for every record of the same table, so identity equality is a perfect key —
+     * no String allocation, no field-count arithmetic on the hot path.
      *
-     * computeIfAbsent ensures at most one Schema is built per unique key even under
-     * concurrent access from multiple Connect worker threads.
+     * If columns are added (auto.evolve), Connect produces a new Schema instance, which
+     * misses the cache and triggers a fresh build automatically.
      */
     private Struct restoreColumnCase(Struct struct, Map<String, String> columnMap) {
-        if (struct.schema() == null) {
+        Schema sourceSchema = struct.schema();
+        if (sourceSchema == null) {
             return struct;
         }
 
-        List<Field> sourceFields = struct.schema().fields();
-        String schemaName = struct.schema().name();
-        if (schemaName == null) schemaName = "_anonymous_";
-        String cacheKey = schemaName + ":" + sourceFields.size();
-
-        Schema cachedSchema = renamedSchemaCache.computeIfAbsent(cacheKey, k -> {
-            SchemaBuilder builder = SchemaBuilder.struct().name(struct.schema().name());
-            if (struct.schema().isOptional()) builder.optional();
-            for (Field field : sourceFields) {
+        RenamedSchema renamed = schemaCache.computeIfAbsent(sourceSchema, src -> {
+            List<Field> fields = src.fields();
+            SchemaBuilder builder = SchemaBuilder.struct().name(src.name());
+            if (src.isOptional()) builder.optional();
+            List<String> names = new ArrayList<>(fields.size());
+            for (Field field : fields) {
                 String actual  = columnMap.get(field.name().toLowerCase(Locale.ROOT));
-                String renamed = (actual != null) ? actual : field.name();
-                if (!renamed.equals(field.name())) {
-                    log.debug("SqlServerCaseRestorer: renaming field '{}' -> '{}'", field.name(), renamed);
+                String newName = (actual != null) ? actual : field.name();
+                if (!newName.equals(field.name())) {
+                    log.debug("SqlServerCaseRestorer: renaming field '{}' -> '{}'", field.name(), newName);
                 }
-                builder.field(renamed, field.schema());
+                builder.field(newName, field.schema());
+                names.add(newName);
             }
-            return builder.build();
+            return new RenamedSchema(builder.build(), Collections.unmodifiableList(names));
         });
 
-        List<String> cachedRenames = renamedFieldsCache.computeIfAbsent(cacheKey, k -> {
-            List<String> renames = new ArrayList<>(sourceFields.size());
-            for (Field field : sourceFields) {
-                String actual  = columnMap.get(field.name().toLowerCase(Locale.ROOT));
-                renames.add((actual != null) ? actual : field.name());
-            }
-            return renames;
-        });
-
-        // Hot path: schema cached — only allocate the Struct, no SchemaBuilder.
-        Struct newStruct = new Struct(cachedSchema);
+        // Hot path: one Struct allocation, no map lookups, no String construction.
+        List<Field> sourceFields = sourceSchema.fields();
+        Struct newStruct = new Struct(renamed.schema);
         for (int i = 0; i < sourceFields.size(); i++) {
-            newStruct.put(cachedRenames.get(i), struct.get(sourceFields.get(i)));
+            newStruct.put(renamed.fieldNames.get(i), struct.get(sourceFields.get(i)));
         }
-
         return newStruct;
     }
 
@@ -307,7 +282,6 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
     public void close() {
         tableCaseMap.clear();
         columnCaseMaps.clear();
-        renamedSchemaCache.clear();
-        renamedFieldsCache.clear();
+        schemaCache.clear();
     }
 }
