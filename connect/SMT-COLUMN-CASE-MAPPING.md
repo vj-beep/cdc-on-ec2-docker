@@ -18,6 +18,19 @@ The connector has `auto.create=true` and `auto.evolve=true` for POC convenience.
 
 ⚠️ **Why?** Auto-creation can silently create unwanted indexes, constraints, or data types that don't match your schema governance requirements.
 
+## Database Naming Conventions
+
+This mismatch exists because SQL Server and PostgreSQL have different best practices:
+
+| Database | Convention | Why | Example |
+|---|---|---|---|
+| **SQL Server** | `camelCase` | Industry standard for .NET/C# code-first migrations | `workItemId`, `dataXml`, `createdAt` |
+| **Aurora PostgreSQL** | `snake_case` | PostgreSQL default (unquoted identifiers fold to lowercase) | `work_item_id`, `data_xml`, `created_at` |
+
+When Debezium replicates from Aurora to SQL Server, it preserves Aurora's `snake_case` column names in Kafka. Without the SMT solution, these names don't exist in the SQL Server table (which uses `camelCase`), causing replication to fail.
+
+The SMT bridges this gap by automatically translating Aurora's `snake_case` column names to SQL Server's `camelCase` during the reverse CDC path.
+
 ## How It Works
 
 We use two custom components to automatically rename columns during replication:
