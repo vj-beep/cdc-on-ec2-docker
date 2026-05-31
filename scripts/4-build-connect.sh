@@ -45,7 +45,7 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
     fi
 
     echo "[*] Step 2: Build Docker image..."
-    echo "[*] Building image (this may take 5-10 minutes)..."
+    echo "[*] Building image (pre-built JARs — typically 1-2 minutes)..."
     DOCKER_BUILDKIT=0 docker compose --env-file .env -f docker-compose.connect-build.yml build
 
     echo ""
@@ -70,7 +70,7 @@ if [[ -z "$CONNECT_1_IP" ]]; then
 fi
 
 echo "[*] Phase 4: Building custom Connect image on Node 4 ($CONNECT_1_IP) [${DISPATCH_MODE^^}]..."
-echo "[*] Building image (this may take 5-10 minutes)..."
+echo "[*] Building image (pre-built JARs — typically 1-2 minutes)..."
 
 if [[ "$DISPATCH_MODE" == "ssh" ]]; then
     # --- SSH dispatch ---
@@ -135,7 +135,7 @@ EOF
         exit 1
     fi
 
-    # Poll for completion (up to 15 minutes for Maven downloads)
+    # Poll for completion (up to 10 minutes — pre-built JARs, no Maven downloads)
     timeout=900
     elapsed=0
     status="Pending"

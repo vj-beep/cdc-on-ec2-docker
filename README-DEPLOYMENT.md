@@ -39,7 +39,7 @@ Scripts run from **any machine with SSH access** to the nodes. Multi-node script
 | **6** | SSH into Node 4 | `./scripts/6-deploy-connectors.sh` |
 | **7** | SSH into Node 4 | `./scripts/7-validate-deployment.sh` |
 
-> **Proxy required in both modes.** No direct internet egress is assumed — Docker pulls, `dnf` installs, and Maven downloads all route through `HTTP_PROXY`/`HTTPS_PROXY`. Set these in `.env` before deployment.
+> **Proxy required in both modes.** No direct internet egress is assumed — Docker pulls and `dnf` installs route through `HTTP_PROXY`/`HTTPS_PROXY`. Set these in `.env` before deployment.
 
 ---
 
@@ -52,7 +52,7 @@ Scripts run from **any machine with SSH access** to the nodes. Multi-node script
 | **2a** | `2a-deploy-repo.sh` | Clone this repo to all 5 EC2 nodes | 3 min |
 | **2b** | `2b-distribute-env.sh` | Copy .env to all 5 nodes (SSM or scp) | 2 min |
 | **3** | `3-setup-ec2.sh` | Install Docker, format NVMe, kernel tuning | 5 min |
-| **4** | `4-build-connect.sh` | Build custom Connect image with Debezium + JDBC | 5-10 min |
+| **4** | `4-build-connect.sh` | Build custom Connect image with Debezium + JDBC | 1-2 min |
 | **5** | `5-start-node.sh` | Start services (brokers → connect → monitor) | 1-5 min/node |
 | **6** | `6-deploy-connectors.sh` | Deploy 4 CDC connectors via REST API | 2 min |
 | **7** | `7-validate-deployment.sh` | Validate infrastructure, connectors, DLQ, consumer lag | 2-5 min |
@@ -360,8 +360,9 @@ Runs on **Node 4 (connect node)** only:
 - Builds `cdc-on-ec2-connect:${CP_VERSION}` using `connect/Dockerfile`
 - Downloads and installs: Debezium SQL Server, Debezium PostgreSQL, JDBC Sink plugins, SqlServerCaseRestorer SMT
 - Includes `mssql-jdbc` driver from `connect/jars/`
-- Debezium connectors pre-cached in `connect/debezium-libs/` to avoid Maven Central rate-limiting
-- Takes 5-10 minutes (Maven SMT compilation + Docker build)
+- Debezium connectors pre-cached in `connect/debezium-libs/` (no download needed at build time)
+- SqlServerCaseRestorer SMT pre-built JAR in `connect/jars/` (no Maven build needed)
+- Takes 1-2 minutes (no Maven — all artifacts committed to git)
 
 **Alternative Approaches (Faster for Subsequent Deployments):**
 
@@ -378,7 +379,7 @@ See `DOCKER-BUILD-OPTIONS.md` for three build strategies:
    ./scripts/on-demand-load-connect-image.sh docker-images/cdc-on-ec2-connect-8.0.0.tar.gz  # On next deployment
    ```
 
-3. **Local build on jumpbox** (with access to Docker + Maven)
+3. **Local build on jumpbox** (with access to Docker)
    ```bash
    ./scripts/4-build-connect.sh --jumpbox
    ```
@@ -481,9 +482,8 @@ curl -s http://localhost:8083/connectors | jq . && echo "✓ Connect ready" || e
 | T+120s+ | Ready | Responds to `curl http://localhost:8083/connectors` |
 
 **Docker Build Issues:**
-- Maven download hanging 5+ min: **Normal** — Maven Central can be slow. Wait up to 10 min.
 - `docker: no space left on device`: Run `docker system prune -a`
-- Build timeout: SSH to node, check `docker logs` for progress
+- Build timeout: SSH to Node 4, check `docker logs` for progress; verify pre-built JARs exist in `connect/jars/`
 
 ---
 
@@ -618,7 +618,7 @@ After running: `./scripts/6-deploy-connectors.sh` to redeploy.
 | Phase 1: "sqlcmd/psql not installed" | CLI tools missing on jumpbox | Install: `sudo dnf install -y sqlcmd postgresql16` |
 | Phase 2a: "git not found" | Git not installed on node | Script installs it automatically via proxy; if it fails: `dnf install -y git` |
 | Phase 3: "must be run as root" | Missing sudo | Run with `sudo bash scripts/3-setup-ec2.sh --local` |
-| Phase 4: Build hangs | Slow Maven downloads through proxy | SSH to Node 4, check `docker logs`; retry usually works |
+| Phase 4: Build hangs | Docker layer download slow or pre-built JARs missing | Verify `connect/jars/` has SMT and JDBC JARs; check `docker logs` on Node 4 |
 | Phase 5: Connect "pull access denied" | Image not built locally | Run Phase 4 first on Node 4 |
 | Phase 6: "Connect not responding" | Connect not started or still initializing | Wait 1-2 min after Phase 5, then retry |
 | Phase 7: "No data in Aurora" | Connectors not RUNNING | Check: `curl http://localhost:8083/connectors/<name>/status` |
