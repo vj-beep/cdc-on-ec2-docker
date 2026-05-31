@@ -9,6 +9,15 @@ When you replicate data from Aurora PostgreSQL back to SQL Server, there's a col
 
 Without fixing this, the reverse CDC path fails because SQL Server can't find columns with lowercase names that don't exist in the target table.
 
+⚠️ **Production Best Practice**
+
+The connector has `auto.create=true` and `auto.evolve=true` for POC convenience. However, **production deployments should:**
+- ✓ Pre-create all target tables on SQL Server with correct camelCase column names
+- ✓ Disable `auto.create` and `auto.evolve` for safety
+- ✗ Never rely on auto-schema generation in production
+
+⚠️ **Why?** Auto-creation can silently create unwanted indexes, constraints, or data types that don't match your schema governance requirements.
+
 ## How It Works
 
 We use two custom components to automatically rename columns during replication:
