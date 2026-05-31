@@ -17,7 +17,7 @@ We use two custom components to automatically rename columns during replication:
 Runs on each Kafka record before it reaches the SQL Server sink. It:
 - Queries SQL Server to discover the actual column names in your tables
 - Renames Kafka record fields from lowercase (`workitemid`) → camelCase (`workItemId`)
-- Renames the topic name to match the SQL Server table name
+- Renames the **record's topic field** (used for routing) to match the SQL Server table name (the actual Kafka topic `aurora.public.workitemdata` in Control Center remains unchanged)
 
 ### 2. SqlServerColumnNamingStrategy (Naming Strategy)
 Operates inside Debezium's schema validation. When Debezium checks if a column exists, it:
@@ -34,19 +34,21 @@ This tells SQL Server to accept and preserve camelCase names in brackets (e.g., 
 1. INSERT into Aurora
    workitemdata: { workitemid=99001, title="Test", dataxml="<x/>" }
 
-2. Debezium publishes to Kafka with lowercase fields
-   Topic: aurora.public.workitemdata
-   Fields: workitemid, title, dataxml
+2. Debezium publishes to Kafka topic: aurora.public.workitemdata
+   Record fields: workitemid, title, dataxml (all lowercase)
 
-3. SqlServerCaseRestorer renames everything
-   Topic: aurora.public.workItemData  ← renamed to match SQL Server table
-   Fields: workItemId, title, dataXml ← renamed to match SQL Server columns
+3. RegexRouter extracts: workitemdata
+   (Kafka topic in Control Center still shows: aurora.public.workitemdata)
 
-4. Debezium JDBC Sink writes to SQL Server
-   Table: dbo.workItemData
-   Columns: workItemId, title, dataXml ← camelCase preserved ✓
+4. SqlServerCaseRestorer renames record fields and routing
+   Record topic field: workitemdata → workItemData (for routing to SQL Server table)
+   Record fields: workitemid→workItemId, dataxml→dataXml (for column matching)
 
-5. Result in SQL Server
+5. Debezium JDBC Sink writes to SQL Server
+   Table: dbo.workItemData (from renamed routing field)
+   Columns: workItemId, title, dataXml ← matched by camelCase ✓
+
+6. Result in SQL Server
    dbo.workItemData: { workItemId=99001, title="Test", dataXml="<x/>" }
 ```
 
