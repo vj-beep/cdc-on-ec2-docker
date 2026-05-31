@@ -30,6 +30,26 @@ This tells SQL Server to accept and preserve camelCase names in brackets (e.g., 
 
 ## Example Data Flow
 
+### Startup (One-Time)
+```
+SqlServerCaseRestorer starts up
+  ↓
+Connects to SQL Server
+  ↓
+Queries sys.columns for all tables in dbo schema
+  ↓
+Builds case mapping:
+  { "workitemdata" → "workItemData",
+    "workitemid" → "workItemId",
+    "dataxml" → "dataXml",
+    "title" → "title",
+    "createdat" → "createdAt",
+    "updatedat" → "updatedAt" }
+  ↓
+Closes connection, caches mapping in memory
+```
+
+### For Each Record (Repeated)
 ```
 1. INSERT into Aurora
    workitemdata: { workitemid=99001, title="Test", dataxml="<x/>" }
@@ -37,16 +57,15 @@ This tells SQL Server to accept and preserve camelCase names in brackets (e.g., 
 2. Debezium publishes to Kafka topic: aurora.public.workitemdata
    Record fields: workitemid, title, dataxml (all lowercase)
 
-3. RegexRouter extracts: workitemdata
-   (Kafka topic in Control Center still shows: aurora.public.workitemdata)
+3. RegexRouter extracts table name: workitemdata
 
-4. SqlServerCaseRestorer renames record fields and routing
-   Record topic field: workitemdata → workItemData (for routing to SQL Server table)
-   Record fields: workitemid→workItemId, dataxml→dataXml (for column matching)
+4. SqlServerCaseRestorer looks up cached mapping (no DB call):
+   Record topic field: workitemdata → workItemData
+   Record fields: workitemid→workItemId, dataxml→dataXml
 
-5. Debezium JDBC Sink writes to SQL Server
-   Table: dbo.workItemData (from renamed routing field)
-   Columns: workItemId, title, dataXml ← matched by camelCase ✓
+5. Debezium JDBC Sink writes to SQL Server:
+   Table: dbo.workItemData
+   Columns: [workItemId], [title], [dataXml] ← camelCase preserved ✓
 
 6. Result in SQL Server
    dbo.workItemData: { workItemId=99001, title="Test", dataXml="<x/>" }
