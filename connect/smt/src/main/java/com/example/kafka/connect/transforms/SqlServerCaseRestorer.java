@@ -244,48 +244,49 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
 
     /**
      * Rebuilds a Struct with camelCase field names, reusing a cached Schema so that
-     * SchemaBuilder is only invoked once per table rather than once per record.
+     * SchemaBuilder is only invoked once per table shape rather than once per record.
      *
-     * Cache key: source schema name (set by Debezium per table, stable across records).
-     * On first call for a given table: build + cache Schema + field rename list.
-     * On subsequent calls: skip SchemaBuilder entirely, only allocate the new Struct.
+     * Cache key: "schemaName:fieldCount" — the field count component invalidates the
+     * cache automatically when columns are added (e.g. via auto.evolve on the forward
+     * sink), so the renamed Schema is always in sync with the actual record structure.
+     *
+     * computeIfAbsent ensures at most one Schema is built per unique key even under
+     * concurrent access from multiple Connect worker threads.
      */
     private Struct restoreColumnCase(Struct struct, Map<String, String> columnMap) {
         if (struct.schema() == null) {
             return struct;
         }
 
-        String schemaName = struct.schema().name();
+        List<Field> sourceFields = struct.schema().fields();
+        // Include field count in the key so any column addition busts the cache.
+        String cacheKey = struct.schema().name() + ":" + sourceFields.size();
 
-        Schema cachedSchema = renamedSchemaCache.get(schemaName);
-        List<String> cachedRenames = renamedFieldsCache.get(schemaName);
-
-        if (cachedSchema == null) {
-            // First record for this table: build the renamed Schema and cache it.
-            SchemaBuilder builder = SchemaBuilder.struct().name(schemaName);
+        Schema cachedSchema = renamedSchemaCache.computeIfAbsent(cacheKey, k -> {
+            SchemaBuilder builder = SchemaBuilder.struct().name(struct.schema().name());
             if (struct.schema().isOptional()) builder.optional();
-
-            List<String> renames = new ArrayList<>(struct.schema().fields().size());
-            for (Field field : struct.schema().fields()) {
+            for (Field field : sourceFields) {
                 String actual  = columnMap.get(field.name().toLowerCase());
                 String renamed = (actual != null) ? actual : field.name();
                 if (!renamed.equals(field.name())) {
                     log.debug("SqlServerCaseRestorer: renaming field '{}' -> '{}'", field.name(), renamed);
                 }
                 builder.field(renamed, field.schema());
-                renames.add(renamed);
             }
+            return builder.build();
+        });
 
-            cachedSchema  = builder.build();
-            cachedRenames = renames;
+        List<String> cachedRenames = renamedFieldsCache.computeIfAbsent(cacheKey, k -> {
+            List<String> renames = new ArrayList<>(sourceFields.size());
+            for (Field field : sourceFields) {
+                String actual  = columnMap.get(field.name().toLowerCase());
+                renames.add((actual != null) ? actual : field.name());
+            }
+            return renames;
+        });
 
-            renamedSchemaCache.put(schemaName, cachedSchema);
-            renamedFieldsCache.put(schemaName, cachedRenames);
-        }
-
-        // Hot path: schema already cached — only allocate the Struct, no SchemaBuilder.
+        // Hot path: schema cached — only allocate the Struct, no SchemaBuilder.
         Struct newStruct = new Struct(cachedSchema);
-        List<Field> sourceFields = struct.schema().fields();
         for (int i = 0; i < sourceFields.size(); i++) {
             newStruct.put(cachedRenames.get(i), struct.get(sourceFields.get(i)));
         }
