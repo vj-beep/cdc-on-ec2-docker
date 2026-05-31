@@ -56,18 +56,19 @@ public class SqlServerColumnNamingStrategy implements ColumnNamingStrategy {
 
         cacheEntry = SqlServerSchemaCache.get(jdbcUrl, user, password, schema);
         log.info("SqlServerColumnNamingStrategy: using shared schema cache ({} columns) for schema '{}' via {}",
-                 cacheEntry.flatColumnMap.size(), schema, jdbcUrl);
+                 cacheEntry.snapshot.flatColumnMap.size(), schema, jdbcUrl);
     }
 
     @Override
     public String resolveColumnName(String fieldName) {
         if (fieldName == null || cacheEntry == null) return fieldName;
 
-        String lower    = fieldName.toLowerCase(Locale.ROOT);
-        String resolved = cacheEntry.flatColumnMap.get(lower);
+        String lower = fieldName.toLowerCase(Locale.ROOT);
+        SqlServerSchemaCache.Snapshot snap = cacheEntry.snapshot;
+        String resolved = snap.flatColumnMap.get(lower);
 
         if (resolved == null && cacheEntry.reloadOnMiss(fieldName)) {
-            resolved = cacheEntry.flatColumnMap.get(lower);
+            resolved = cacheEntry.snapshot.flatColumnMap.get(lower);
         }
 
         if (resolved != null && !resolved.equals(fieldName)) {

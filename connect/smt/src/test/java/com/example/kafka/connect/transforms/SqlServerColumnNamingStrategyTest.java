@@ -82,7 +82,6 @@ class SqlServerColumnNamingStrategyTest {
             strategy.configure(configProps());
         }
 
-        // Suppress reload-on-miss — no SQL Server in test env
         strategy.cacheEntry.lastReloadAttempt.set(Long.MAX_VALUE - SqlServerSchemaCache.RELOAD_COOLDOWN_MS);
         assertEquals("unknownfield", strategy.resolveColumnName("unknownfield"));
     }

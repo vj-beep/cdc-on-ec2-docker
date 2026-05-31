@@ -93,6 +93,8 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
     // Keyed by the source Schema instance — Connect reuses the exact same Schema object for
     // every record of the same table, so identity equality is a perfect key and avoids any
     // String allocation on the hot path.
+    // Bounded: if auto.evolve generates many schema versions, we flush to prevent memory leak.
+    private static final int SCHEMA_CACHE_MAX_SIZE = 1024;
     private final ConcurrentHashMap<Schema, RenamedSchema> schemaCache = new ConcurrentHashMap<>();
 
     @Override
@@ -105,7 +107,7 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
 
         cacheEntry = SqlServerSchemaCache.get(jdbcUrl, user, password, schema);
         log.info("SqlServerCaseRestorer: using shared schema cache ({} tables) for schema '{}' via {}",
-                 cacheEntry.tableCaseMap.size(), schema, jdbcUrl);
+                 cacheEntry.snapshot.tableCaseMap.size(), schema, jdbcUrl);
     }
 
     @Override
@@ -119,9 +121,13 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
         String tail = (lastDot >= 0) ? topic.substring(lastDot + 1) : topic;
         String tailLower = tail.toLowerCase(Locale.ROOT);
 
-        String actualTable = cacheEntry.tableCaseMap.get(tailLower);
+        // Read snapshot once per record — consistent view even if reload occurs mid-flight
+        SqlServerSchemaCache.Snapshot snap = cacheEntry.snapshot;
+
+        String actualTable = snap.tableCaseMap.get(tailLower);
         if (actualTable == null && cacheEntry.reloadOnMiss(tailLower)) {
-            actualTable = cacheEntry.tableCaseMap.get(tailLower);
+            snap = cacheEntry.snapshot;
+            actualTable = snap.tableCaseMap.get(tailLower);
         }
 
         String newTopic = topic;
@@ -130,7 +136,7 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
             log.debug("SqlServerCaseRestorer: table topic {} -> {}", topic, newTopic);
         }
 
-        Map<String, String> columnMap = cacheEntry.columnCaseMaps.get(tailLower);
+        Map<String, String> columnMap = snap.columnCaseMaps.get(tailLower);
 
         Object newValue = record.value();
         if (record.value() instanceof Struct && columnMap != null && !columnMap.isEmpty()) {
@@ -180,6 +186,11 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
         Schema sourceSchema = struct.schema();
         if (sourceSchema == null) {
             return struct;
+        }
+
+        if (schemaCache.size() > SCHEMA_CACHE_MAX_SIZE) {
+            log.info("SqlServerCaseRestorer: schema cache exceeded {} entries, flushing", SCHEMA_CACHE_MAX_SIZE);
+            schemaCache.clear();
         }
 
         RenamedSchema renamed = schemaCache.computeIfAbsent(sourceSchema, src -> {

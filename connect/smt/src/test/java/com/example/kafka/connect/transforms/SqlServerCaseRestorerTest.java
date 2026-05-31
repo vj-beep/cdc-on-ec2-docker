@@ -64,11 +64,12 @@ class SqlServerCaseRestorerTest {
 
     /** Inject table map directly — bypasses configure() so no real DB required. */
     private void seed(String... pairs) {
-        Map<String, String> tableMap = new HashMap<>(smt.cacheEntry.tableCaseMap);
+        Map<String, String> tableMap = new HashMap<>(smt.cacheEntry.snapshot.tableCaseMap);
         for (int i = 0; i < pairs.length; i += 2) {
             tableMap.put(pairs[i].toLowerCase(), pairs[i + 1]);
         }
-        smt.cacheEntry.tableCaseMap = tableMap;
+        smt.cacheEntry.snapshot = new SqlServerSchemaCache.Snapshot(
+            tableMap, smt.cacheEntry.snapshot.columnCaseMaps, smt.cacheEntry.snapshot.flatColumnMap);
     }
 
     private SinkRecord record(String topic) {
@@ -250,11 +251,11 @@ class SqlServerCaseRestorerTest {
                 smt.configure(configProps());
             }
 
-            assertEquals("FlagSet",  smt.cacheEntry.tableCaseMap.get("flagset"));
-            assertEquals("workItem", smt.cacheEntry.tableCaseMap.get("workitem"));
-            assertEquals(2, smt.cacheEntry.tableCaseMap.size());
-            assertEquals("workItemId", smt.cacheEntry.columnCaseMaps.get("workitem").get("workitemid"));
-            assertEquals("name",       smt.cacheEntry.columnCaseMaps.get("flagset").get("name"));
+            assertEquals("FlagSet",  smt.cacheEntry.snapshot.tableCaseMap.get("flagset"));
+            assertEquals("workItem", smt.cacheEntry.snapshot.tableCaseMap.get("workitem"));
+            assertEquals(2, smt.cacheEntry.snapshot.tableCaseMap.size());
+            assertEquals("workItemId", smt.cacheEntry.snapshot.columnCaseMaps.get("workitem").get("workitemid"));
+            assertEquals("name",       smt.cacheEntry.snapshot.columnCaseMaps.get("flagset").get("name"));
         }
 
         @Test
@@ -277,10 +278,10 @@ class SqlServerCaseRestorerTest {
         @DisplayName("close() clears the schema cache but not the shared entry")
         void closeClears() {
             seed("flagset", "FlagSet");
-            assertEquals(1, smt.cacheEntry.tableCaseMap.size());
+            assertEquals(1, smt.cacheEntry.snapshot.tableCaseMap.size());
             smt.close();
             // Shared cache entry is not cleared by close() — it belongs to SqlServerSchemaCache
-            assertEquals(1, smt.cacheEntry.tableCaseMap.size());
+            assertEquals(1, smt.cacheEntry.snapshot.tableCaseMap.size());
         }
     }
 
@@ -295,9 +296,10 @@ class SqlServerCaseRestorerTest {
             for (int i = 0; i < pairs.length; i += 2) {
                 colMap.put(pairs[i].toLowerCase(), pairs[i + 1]);
             }
-            Map<String, Map<String, String>> colMaps = new HashMap<>(smt.cacheEntry.columnCaseMaps);
+            Map<String, Map<String, String>> colMaps = new HashMap<>(smt.cacheEntry.snapshot.columnCaseMaps);
             colMaps.put(tableLower, colMap);
-            smt.cacheEntry.columnCaseMaps = colMaps;
+            smt.cacheEntry.snapshot = new SqlServerSchemaCache.Snapshot(
+                smt.cacheEntry.snapshot.tableCaseMap, colMaps, smt.cacheEntry.snapshot.flatColumnMap);
         }
 
         private SinkRecord structRecord(String topic, Schema valueSchema, Struct value) {
@@ -428,17 +430,18 @@ class SqlServerCaseRestorerTest {
             // Simulate 50 tables with 10 columns each
             Map<String, String> tableMap = new HashMap<>();
             Map<String, Map<String, String>> colMaps = new HashMap<>();
+            Map<String, String> flatMap = new HashMap<>();
             for (int t = 0; t < 50; t++) {
                 String tableName = "table" + t;
                 tableMap.put(tableName, "Table" + t);
                 Map<String, String> colMap = new HashMap<>();
                 for (int c = 0; c < 10; c++) {
                     colMap.put("column" + c, "Column" + c);
+                    flatMap.put("column" + c, "Column" + c);
                 }
                 colMaps.put(tableName, colMap);
             }
-            smt.cacheEntry.tableCaseMap = tableMap;
-            smt.cacheEntry.columnCaseMaps = colMaps;
+            smt.cacheEntry.snapshot = new SqlServerSchemaCache.Snapshot(tableMap, colMaps, flatMap);
 
             Schema valueSchema = SchemaBuilder.struct().name("test.value")
                 .field("column0", Schema.INT64_SCHEMA)

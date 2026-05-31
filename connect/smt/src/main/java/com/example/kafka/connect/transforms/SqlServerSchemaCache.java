@@ -24,13 +24,15 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * Reload-on-miss: if a column or table name is not found in the cache, a reload is triggered
  * (at most once per RELOAD_COOLDOWN_MS) to handle schema evolution without requiring a connector
- * restart.
+ * restart. Reload failures are logged and swallowed — stale cache data remains valid.
  */
 public final class SqlServerSchemaCache {
 
     private static final Logger log = LoggerFactory.getLogger(SqlServerSchemaCache.class);
 
     static final long RELOAD_COOLDOWN_MS = 60_000;
+    private static final int LOGIN_TIMEOUT_SECONDS = 30;
+    private static final int QUERY_TIMEOUT_SECONDS = 30;
 
     /** One entry per (jdbcUrl + schema) pair. */
     static final ConcurrentHashMap<String, Entry> CACHE = new ConcurrentHashMap<>();
@@ -54,16 +56,35 @@ public final class SqlServerSchemaCache {
         return entry;
     }
 
+    /**
+     * Immutable snapshot of all schema metadata. Published atomically via a single
+     * volatile write so readers never see a torn state across table/column maps.
+     */
+    public static final class Snapshot {
+        public final Map<String, String> tableCaseMap;
+        public final Map<String, Map<String, String>> columnCaseMaps;
+        public final Map<String, String> flatColumnMap;
+
+        Snapshot(Map<String, String> tableCaseMap,
+                 Map<String, Map<String, String>> columnCaseMaps,
+                 Map<String, String> flatColumnMap) {
+            this.tableCaseMap   = Collections.unmodifiableMap(tableCaseMap);
+            this.columnCaseMaps = Collections.unmodifiableMap(columnCaseMaps);
+            this.flatColumnMap  = Collections.unmodifiableMap(flatColumnMap);
+        }
+
+        static final Snapshot EMPTY = new Snapshot(
+            Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap());
+    }
+
     public static final class Entry {
         final String jdbcUrl;
         final String user;
         final String password;
         final String schema;
 
-        // volatile so SMT and NamingStrategy always see the latest reload
-        volatile Map<String, String> tableCaseMap = Collections.emptyMap();
-        volatile Map<String, Map<String, String>> columnCaseMaps = Collections.emptyMap();
-        volatile Map<String, String> flatColumnMap = Collections.emptyMap();
+        // Single volatile reference — all three maps are always read from the same snapshot
+        volatile Snapshot snapshot = Snapshot.EMPTY;
 
         // Package-private so tests can pin to Long.MAX_VALUE to suppress reloads
         final AtomicLong lastReloadAttempt = new AtomicLong(0);
@@ -89,10 +110,10 @@ public final class SqlServerSchemaCache {
             Map<String, Map<String, String>> newColumnMaps = new HashMap<>();
             Map<String, String> newFlatMap = new HashMap<>();
 
-            DriverManager.setLoginTimeout(30);
             try (Connection conn = DriverManager.getConnection(jdbcUrl, user, password);
                  PreparedStatement ps = conn.prepareStatement(sql)) {
 
+                ps.setQueryTimeout(QUERY_TIMEOUT_SECONDS);
                 ps.setString(1, schema);
                 try (ResultSet rs = ps.executeQuery()) {
                     String currentTable = null;
@@ -129,10 +150,8 @@ public final class SqlServerSchemaCache {
                     "SqlServerSchemaCache: failed to load metadata from SQL Server: " + e.getMessage(), e);
             }
 
-            // Publish atomically — readers see either the old or new complete snapshot
-            tableCaseMap   = Collections.unmodifiableMap(newTableMap);
-            columnCaseMaps = Collections.unmodifiableMap(newColumnMaps);
-            flatColumnMap  = Collections.unmodifiableMap(newFlatMap);
+            // Single atomic publish — readers always see a consistent snapshot
+            snapshot = new Snapshot(newTableMap, newColumnMaps, newFlatMap);
 
             log.info("SqlServerSchemaCache: cached {} tables, {} total columns for schema '{}'",
                      newTableMap.size(), newFlatMap.size(), schema);
@@ -141,8 +160,13 @@ public final class SqlServerSchemaCache {
         /**
          * Reloads metadata if a miss is detected and the cooldown has elapsed.
          * Returns true if a reload was performed (caller should retry their lookup).
+         * Failures are logged and swallowed — stale cache data remains valid.
          */
         public boolean reloadOnMiss(String missingName) {
+            if (missingName != null && missingName.startsWith("__")) {
+                return false;
+            }
+
             long now  = System.currentTimeMillis();
             long last = lastReloadAttempt.get();
             if (now - last < RELOAD_COOLDOWN_MS) {
@@ -150,11 +174,16 @@ public final class SqlServerSchemaCache {
                 return false;
             }
             if (!lastReloadAttempt.compareAndSet(last, now)) {
-                return false; // another thread won the race
+                return false;
             }
             log.info("SqlServerSchemaCache: '{}' not found in cache — reloading schema metadata", missingName);
-            load();
-            return true;
+            try {
+                load();
+                return true;
+            } catch (RuntimeException e) {
+                log.warn("SqlServerSchemaCache: reload failed (stale cache still active): {}", e.getMessage());
+                return false;
+            }
         }
     }
 }
