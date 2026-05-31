@@ -1,203 +1,104 @@
-# SqlServerCaseRestorer SMT — Column Case Mapping
+# Column Case Mapping for Bi-Directional CDC
 
-## Overview
+## What's the Problem?
 
-Two custom components work together to bridge the column name case mismatch in the reverse CDC path (Aurora → SQL Server):
+When you replicate data from Aurora PostgreSQL back to SQL Server, there's a column naming mismatch:
 
-| Component | Type | Role |
-|---|---|---|
-| `SqlServerCaseRestorer` | Kafka Connect SMT | Renames topic tail and Struct field names (lowercase → camelCase) before the sink sees the record |
-| `SqlServerColumnNamingStrategy` | Debezium `ColumnNamingStrategy` | Resolves column names inside Debezium's schema validation and SQL generation path |
+- **Aurora** uses lowercase column names: `workitemid`, `dataxml` (PostgreSQL default)
+- **SQL Server** has camelCase column names: `workItemId`, `dataXml` (original source columns)
 
-Both are compiled into the same JAR: `connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar`
+Without fixing this, the reverse CDC path fails because SQL Server can't find columns with lowercase names that don't exist in the target table.
 
----
+## How It Works
 
-## Problem Statement
+We use two custom components to automatically rename columns during replication:
 
-In a bi-directional CDC pipeline:
+### 1. SqlServerCaseRestorer (SMT — Simple Message Transform)
+Runs on each Kafka record before it reaches the SQL Server sink. It:
+- Queries SQL Server to discover the actual column names in your tables
+- Renames Kafka record fields from lowercase (`workitemid`) → camelCase (`workItemId`)
+- Renames the topic name to match the SQL Server table name
 
-1. **Forward path:** SQL Server (`dbo.workItemData` with camelCase columns) → JDBC sink auto-creates Aurora table as `public.workitemdata` with lowercase columns (`workitemid`, `dataxml`, etc.) — PostgreSQL folds unquoted identifiers to lowercase.
+### 2. SqlServerColumnNamingStrategy (Naming Strategy)
+Operates inside Debezium's schema validation. When Debezium checks if a column exists, it:
+- Receives the lowercase column name from Aurora (`workitemid`)
+- Looks up the actual camelCase name from SQL Server (`workItemId`)
+- Returns the correct name so the column is found in the target table
 
-2. **Reverse path:** Aurora → SQL Server
-   - Debezium PostgreSQL source publishes records with lowercase field names matching Aurora's storage
-   - SQL Server target has camelCase columns — `workItemId`, `dataXml`, `createdAt`, `updatedAt`
-   - **Problem A:** Debezium JDBC sink's `resolveMissingFields()` calls `hasColumn("workitemid")` against the SQL Server table, which has `workItemId`. Java `HashMap.containsKey()` is case-sensitive → false → triggers ALTER TABLE → crashes with "field is not optional but has no default value"
-   - **Problem B:** Even after the naming strategy resolves `workitemid → workItemId`, `GeneralDatabaseDialect.resolveColumnName()` applies `toLowerCase()` to the result when `quote.identifiers=false`, undoing the fix before `hasColumn()` is called
+### 3. Required Setting: `quote.identifiers=true`
+This tells SQL Server to accept and preserve camelCase names in brackets (e.g., `[workItemId]`). Without it, SQL Server lowercases all identifiers and the column names still won't match.
 
----
-
-## Solution
-
-### Component 1: SqlServerCaseRestorer (SMT)
-
-Runs in the Kafka Connect SMT chain, **before** the JDBC sink processes the record.
-
-At startup, queries SQL Server `sys.tables` and `sys.columns` to build two maps:
-```
-tableCaseMap:    lowercase table name → actual case  (e.g. "workitemdata" → "workItemData")
-columnCaseMaps:  table (lowercase) → { column (lowercase) → actual case }
-                 e.g. "workitemdata" → { "workitemid" → "workItemId", "dataxml" → "dataXml", ... }
-```
-
-For each record:
-1. Rewrites the **topic tail** (`aurora.public.workitemdata` → `aurora.public.workItemData`) — this determines the target SQL Server table name
-2. Rebuilds the **Struct** with a new Schema, renaming every field to its actual camelCase name
-3. Passes the renamed Schema (not the original lowercase schema) to `record.newRecord()` — critical so that `SinkRecord.valueSchema()` also reflects camelCase, since Debezium reads `originalKafkaRecord.valueSchema()` for field validation
-
-### Component 2: SqlServerColumnNamingStrategy (ColumnNamingStrategy)
-
-Hooks into Debezium JDBC sink's internal column resolution path. `resolveMissingFields()` calls `dialect.resolveColumnName(fieldDescriptor)` which calls this strategy's `resolveColumnName(String fieldName)` before doing the `hasColumn()` check.
-
-The strategy queries `sys.columns` at startup and builds a `lowercase → actual case` map. `resolveColumnName("workitemid")` returns `"workItemId"`.
-
-### Why Both Are Needed
-
-The SMT operates on the Kafka record's Struct/Schema. The naming strategy operates on the `FieldDescriptor.getColumnName()` value, which comes from the `__debezium.source.column.name` schema parameter set by the Debezium PostgreSQL source — this always reflects Aurora's lowercase column name regardless of SMT transformations.
-
-### Why `quote.identifiers=true` Is Required
-
-`GeneralDatabaseDialect.resolveColumnName()` bytecode (Debezium 3.2.6):
-```
-1. Call ColumnNamingStrategy.resolveColumnName(fieldColumnName) → "workItemId"  ✓
-2. if isQuoteIdentifiers() → return camelCase as-is                              ← with true: exits here ✓
-3. if isIdentifierUppercaseWhenNotQuoted() → return toUpperCase()
-4. else → return toLowerCase()                                                   ← without true: undoes fix ✗
-```
-
-With `quote.identifiers=true`, the resolved camelCase name is passed directly to `hasColumn("workItemId")` → true → no ALTER TABLE. SQL Server accepts bracket-quoted identifiers (`[workItemId]`) correctly.
-
----
-
-## Data Flow
+## Example Data Flow
 
 ```
-Aurora public.workitemdata INSERT
-  │  fields: workitemid=99001, title="Test", dataxml="<x/>", createdat=..., updatedat=...
-  │
-  ▼
-Debezium PostgreSQL source
-  │  topic: aurora.public.workitemdata
-  │  key schema:   { workitemid: BIGINT }
-  │  value schema: { workitemid, title, dataxml, createdat, updatedat }  ← all lowercase
-  │
-  ▼
-[SMT: RegexRouter]
-  │  topic: aurora.public.workitemdata → extracts table tail
-  │
-  ▼
-[SMT: SqlServerCaseRestorer]
-  │  topic:  aurora.public.workitemdata → aurora.public.workItemData
-  │  schema: rebuilt with camelCase field names
-  │  struct: { workItemId=99001, title="Test", dataXml="<x/>", createdAt=..., updatedAt=... }
-  │
-  ▼
-Debezium JDBC Sink (jdbc-sink-sqlserver)
-  │  SqlServerColumnNamingStrategy.resolveColumnName("workitemid") → "workItemId"
-  │  quote.identifiers=true → hasColumn("workItemId") → true  ✓ (no ALTER TABLE)
-  │  SQL: MERGE dbo.[workItemData] ... ([workItemId],[title],[dataXml],[createdAt],[updatedAt])
-  │
-  ▼
-SQL Server dbo.workItemData
-  │  workItemId=99001, title="Test", dataXml="<x/>", createdAt=..., updatedAt=...
-  └─ camelCase columns intact, no schema changes on SQL Server required ✓
+1. INSERT into Aurora
+   workitemdata: { workitemid=99001, title="Test", dataxml="<x/>" }
+
+2. Debezium publishes to Kafka with lowercase fields
+   Topic: aurora.public.workitemdata
+   Fields: workitemid, title, dataxml
+
+3. SqlServerCaseRestorer renames everything
+   Topic: aurora.public.workItemData  ← renamed to match SQL Server table
+   Fields: workItemId, title, dataXml ← renamed to match SQL Server columns
+
+4. Debezium JDBC Sink writes to SQL Server
+   Table: dbo.workItemData
+   Columns: workItemId, title, dataXml ← camelCase preserved ✓
+
+5. Result in SQL Server
+   dbo.workItemData: { workItemId=99001, title="Test", dataXml="<x/>" }
 ```
 
----
+## How to Enable It
 
-## Deployment
+The components are automatically included in the connector deployment. The critical settings in your `.env` are:
 
-### JAR Distribution
-
-The JAR is pre-built and committed to git — no Maven build step required at deployment time:
-
-```
-connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar
-```
-
-The Dockerfile copies it directly into the JDBC sink plugin directory:
-
-```dockerfile
-COPY connect/jars/kafka-connect-sqlserver-case-restorer-*.jar \
-  /usr/share/confluent-hub-components/debezium-connector-jdbc/
-```
-
-To rebuild after source changes:
 ```bash
-cd connect/smt
-mvn clean package -DskipTests -q
-cp target/kafka-connect-sqlserver-case-restorer-1.0.0.jar ../jars/
+# Enable PostgreSQL logical replication (one-time setup)
+rds.logical_replication=1  # Set in Aurora parameter group
+
+# Create replication publication (done automatically during Phase 1)
+CREATE PUBLICATION cdc_publication FOR ALL TABLES;
+
+# Connector configuration automatically includes:
+# - quote.identifiers=true
+# - SqlServerCaseRestorer SMT
+# - SqlServerColumnNamingStrategy
 ```
 
-### Connector Configuration (`jdbc-sink-sqlserver.json`)
+**No additional setup is needed.** The deployment scripts handle everything automatically.
 
-```json
-{
-  "quote.identifiers": "true",
+## Testing It Works
 
-  "transforms": "routeTopics,caseRestorer",
-  "transforms.routeTopics.type": "org.apache.kafka.connect.transforms.RegexRouter",
-  "transforms.routeTopics.regex": "aurora.public.(.+)",
-  "transforms.routeTopics.replacement": "$1",
-
-  "transforms.caseRestorer.type": "com.example.kafka.connect.transforms.SqlServerCaseRestorer",
-  "transforms.caseRestorer.jdbc.url": "jdbc:sqlserver://${SQLSERVER_HOST}:${SQLSERVER_PORT};databaseName=${SQLSERVER_DATABASE};encrypt=false",
-  "transforms.caseRestorer.jdbc.user": "${SQLSERVER_USER}",
-  "transforms.caseRestorer.jdbc.password": "${SQLSERVER_PASSWORD}",
-  "transforms.caseRestorer.table.schema": "dbo",
-
-  "column.naming.strategy": "com.example.kafka.connect.transforms.SqlServerColumnNamingStrategy",
-  "column.naming.strategy.jdbc.url": "jdbc:sqlserver://${SQLSERVER_HOST}:${SQLSERVER_PORT};databaseName=${SQLSERVER_DATABASE};encrypt=false",
-  "column.naming.strategy.jdbc.user": "${SQLSERVER_USER}",
-  "column.naming.strategy.jdbc.password": "${SQLSERVER_PASSWORD}",
-  "column.naming.strategy.table.schema": "dbo"
-}
+Run the automated test from the private repo:
+```bash
+cd infra-private
+./scripts/test-workitemdata-reverse-path.sh
 ```
 
-**All three pieces are required together:**
-- `SqlServerCaseRestorer` SMT — renames topic and Struct fields
-- `SqlServerColumnNamingStrategy` — resolves names in Debezium's schema validation path
-- `quote.identifiers=true` — prevents the dialect from lowercasing the resolved name before `hasColumn()`
+This test:
+1. Inserts a row into Aurora (`workitemdata`)
+2. Waits 5 seconds for CDC propagation
+3. Verifies the row appears in SQL Server (`dbo.workItemData`) with camelCase columns
 
----
-
-## Verified Test Cases
-
-Tested on 2026-05-30 with `dbo.workItemData` (columns: `workItemId`, `title`, `dataXml`, `createdAt`, `updatedAt`):
-
-| Test | Aurora INSERT | SQL Server result |
-|---|---|---|
-| Basic INSERT | `workitemid=99001, title="Reverse CDC Test"` | ✅ `workItemId=99001` in `dbo.workItemData` |
-| INSERT #2 | `workitemid=99002, title="SMT Test Record 2"` | ✅ All camelCase columns populated |
-| Special chars | `dataxml="<data>test <>&</data>"` | ✅ Passed through intact |
-| UPDATE upsert | `UPDATE workitemdata SET title="... UPDATED"` | ✅ `updatedAt` timestamp updated correctly |
-
----
+Expected output:
+```
+✅ Row found in SQL Server dbo.workItemData
+   Column names: workItemId, title, dataXml, createdAt, updatedAt
+```
 
 ## Troubleshooting
 
-### "Cannot ALTER table because field is not optional but has no default value"
-`quote.identifiers` is not set to `true`, or `column.naming.strategy` is missing from the connector config. Both are required.
+**"Cannot ALTER table because field is not optional but has no default value"**
+- → `quote.identifiers` needs to be `true` in the connector
+- → Check: `curl http://localhost:8084/connectors/jdbc-sink-sqlserver | jq '.config["quote.identifiers"]'`
 
-### "cached 0 column name mappings" in Connect logs
-JDBC credentials lack `SELECT` permission on `sys.columns`, or the `table.schema` config doesn't match the SQL Server schema name (default: `dbo`).
+**Data not propagating from Aurora to SQL Server**
+- → Check replication slot is active: `SELECT slot_name, active FROM pg_replication_slots;`
+- → Should show: `debezium_cdc | t` (active = true)
+- → If not active, restart the connector: `curl -X POST http://localhost:8084/connectors/debezium-postgres-source/restart`
 
-### Topic not renamed (still lowercase after SMT)
-Check that `SqlServerCaseRestorer` is listed **after** `RegexRouter` in the `transforms` chain, and that the table exists in the SQL Server schema being queried at startup.
-
-### Column mapping not applied after SQL Server schema change (new table or column added)
-The maps are loaded once at connector startup. Restart the connector task to reload: `POST /connectors/jdbc-sink-sqlserver/tasks/0/restart`
-
----
-
-## Source Files
-
-```
-connect/
-├── jars/
-│   └── kafka-connect-sqlserver-case-restorer-1.0.0.jar   ← pre-built, committed to git
-└── smt/
-    └── src/main/java/com/example/kafka/connect/transforms/
-        ├── SqlServerCaseRestorer.java                      ← SMT implementation
-        └── SqlServerColumnNamingStrategy.java              ← ColumnNamingStrategy implementation
-```
+**Column names still lowercase in SQL Server**
+- → Check the smit JAR was loaded: `curl http://localhost:8083/connectors/jdbc-sink-sqlserver | jq '.config["transforms"]'`
+- → Should include `caseRestorer`
