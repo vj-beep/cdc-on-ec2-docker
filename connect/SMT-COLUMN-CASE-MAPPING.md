@@ -71,25 +71,6 @@ CREATE PUBLICATION cdc_publication FOR ALL TABLES;
 
 **No additional setup is needed.** The deployment scripts handle everything automatically.
 
-## Testing It Works
-
-Run the automated test from the private repo:
-```bash
-cd infra-private
-./scripts/test-workitemdata-reverse-path.sh
-```
-
-This test:
-1. Inserts a row into Aurora (`workitemdata`)
-2. Waits 5 seconds for CDC propagation
-3. Verifies the row appears in SQL Server (`dbo.workItemData`) with camelCase columns
-
-Expected output:
-```
-✅ Row found in SQL Server dbo.workItemData
-   Column names: workItemId, title, dataXml, createdAt, updatedAt
-```
-
 ## Troubleshooting
 
 **"Cannot ALTER table because field is not optional but has no default value"**
