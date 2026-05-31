@@ -401,6 +401,80 @@ class SqlServerCaseRestorerTest {
         }
     }
 
+    // ── throughput benchmark ─────────────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("Throughput at scale")
+    class ThroughputTests {
+
+        @Test
+        @DisplayName("Processes 1M records in < 5s (200K+ rec/sec) — proves no latency concern at TB scale")
+        void millionRecordThroughput() {
+            // Simulate 50 tables with 10 columns each
+            for (int t = 0; t < 50; t++) {
+                String tableName = "table" + t;
+                smt.tableCaseMap.put(tableName, "Table" + t);
+                Map<String, String> colMap = new HashMap<>();
+                for (int c = 0; c < 10; c++) {
+                    colMap.put("column" + c, "Column" + c);
+                }
+                smt.columnCaseMaps.put(tableName, colMap);
+            }
+
+            Schema valueSchema = SchemaBuilder.struct().name("test.value")
+                .field("column0", Schema.INT64_SCHEMA)
+                .field("column1", Schema.STRING_SCHEMA)
+                .field("column2", Schema.OPTIONAL_STRING_SCHEMA)
+                .field("column3", Schema.INT32_SCHEMA)
+                .field("column4", Schema.OPTIONAL_STRING_SCHEMA)
+                .build();
+
+            Schema keySchema = SchemaBuilder.struct().name("test.key")
+                .field("column0", Schema.INT64_SCHEMA).build();
+
+            int recordCount = 1_000_000;
+            SinkRecord[] records = new SinkRecord[recordCount];
+            for (int i = 0; i < recordCount; i++) {
+                Struct value = new Struct(valueSchema)
+                    .put("column0", (long) i)
+                    .put("column1", "value-" + i)
+                    .put("column2", null)
+                    .put("column3", i % 1000)
+                    .put("column4", "data");
+                Struct key = new Struct(keySchema).put("column0", (long) i);
+                records[i] = new SinkRecord(
+                    "aurora.public.table" + (i % 50), 0,
+                    keySchema, key, valueSchema, value,
+                    (long) i, System.currentTimeMillis(), TimestampType.CREATE_TIME,
+                    new ConnectHeaders()
+                );
+            }
+
+            // Warmup
+            for (int i = 0; i < 1000; i++) {
+                smt.apply(records[i]);
+            }
+
+            long start = System.nanoTime();
+            for (int i = 0; i < recordCount; i++) {
+                smt.apply(records[i]);
+            }
+            long elapsed = System.nanoTime() - start;
+
+            double seconds = elapsed / 1_000_000_000.0;
+            double recsPerSec = recordCount / seconds;
+
+            System.out.printf("Throughput: %.0f records/sec (%.2fs for %d records)%n",
+                recsPerSec, seconds, recordCount);
+
+            // At TB scale: ~23K rec/sec needed (1 TB / avg 1 KB per record / 12 hours)
+            // At 300-500 GB/day: ~5-8K rec/sec steady state
+            // Require at least 200K rec/sec to be >10x headroom
+            assert recsPerSec > 200_000 :
+                "SMT throughput " + recsPerSec + " rec/sec is below 200K — investigate";
+        }
+    }
+
     // ── config() descriptor ───────────────────────────────────────────────────
 
     @Test

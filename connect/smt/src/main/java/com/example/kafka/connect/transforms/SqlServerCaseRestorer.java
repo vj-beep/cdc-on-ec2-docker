@@ -197,20 +197,19 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
         }
 
         String topic = record.topic();
-        String[] parts = topic.split("\\.", -1);
+        int lastDot = topic.lastIndexOf('.');
+        String tail = (lastDot >= 0) ? topic.substring(lastDot + 1) : topic;
+        String tailLower = tail.toLowerCase(Locale.ROOT);
 
-        String tail        = parts[parts.length - 1];
-        String actualTable = tableCaseMap.get(tail.toLowerCase(Locale.ROOT));
+        String actualTable = tableCaseMap.get(tailLower);
 
         String newTopic = topic;
         if (actualTable != null && !actualTable.equals(tail)) {
-            parts[parts.length - 1] = actualTable;
-            newTopic = String.join(".", parts);
+            newTopic = (lastDot >= 0) ? topic.substring(0, lastDot + 1) + actualTable : actualTable;
             log.debug("SqlServerCaseRestorer: table topic {} -> {}", topic, newTopic);
         }
 
-        String tableLower = (actualTable != null ? actualTable : tail).toLowerCase(Locale.ROOT);
-        Map<String, String> columnMap = columnCaseMaps.get(tableLower);
+        Map<String, String> columnMap = columnCaseMaps.get(tailLower);
 
         Object newValue = record.value();
         if (record.value() instanceof Struct && columnMap != null && !columnMap.isEmpty()) {
