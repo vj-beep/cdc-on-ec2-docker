@@ -65,14 +65,37 @@ public class SqlServerColumnNamingStrategy implements ColumnNamingStrategy {
 
         String lower = fieldName.toLowerCase(Locale.ROOT);
         SqlServerSchemaCache.Snapshot snap = cacheEntry.snapshot;
-        String resolved = snap.flatColumnMap.get(lower);
+
+        // Prefer per-table lookup: SqlServerCaseRestorer sets CURRENT_TABLE_LOWER on the same
+        // thread before the sink processes the record. This avoids false "missing column" errors
+        // when two tables share a same-lowercase column name with different actual case
+        // (e.g. workItemData.createdAt vs TestCASE_INVENTORY.CreatedAt both map to "createdat").
+        String currentTable = SqlServerSchemaCache.CURRENT_TABLE_LOWER.get();
+        String resolved = null;
+        if (currentTable != null) {
+            Map<String, String> tableMap = snap.columnCaseMaps.get(currentTable);
+            if (tableMap != null) {
+                resolved = tableMap.get(lower);
+            }
+        }
+
+        // Fallback to flat map if no table context or table not in cache yet
+        if (resolved == null) {
+            resolved = snap.flatColumnMap.get(lower);
+        }
 
         if (resolved == null && cacheEntry.reloadOnMiss(fieldName)) {
-            resolved = cacheEntry.snapshot.flatColumnMap.get(lower);
+            snap = cacheEntry.snapshot;
+            if (currentTable != null) {
+                Map<String, String> tableMap = snap.columnCaseMaps.get(currentTable);
+                if (tableMap != null) resolved = tableMap.get(lower);
+            }
+            if (resolved == null) resolved = snap.flatColumnMap.get(lower);
         }
 
         if (resolved != null && !resolved.equals(fieldName)) {
-            log.debug("SqlServerColumnNamingStrategy: resolved '{}' -> '{}'", fieldName, resolved);
+            log.debug("SqlServerColumnNamingStrategy: resolved '{}' -> '{}' (table={})",
+                      fieldName, resolved, currentTable != null ? currentTable : "unknown");
             return resolved;
         }
         return fieldName;

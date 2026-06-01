@@ -138,6 +138,10 @@ public class SqlServerCaseRestorer<R extends ConnectRecord<R>> implements Transf
 
         Map<String, String> columnMap = snap.columnCaseMaps.get(tailLower);
 
+        // Tell SqlServerColumnNamingStrategy which table this record belongs to so it can
+        // use the per-table column map instead of the cross-table flat map.
+        SqlServerSchemaCache.CURRENT_TABLE_LOWER.set(tailLower);
+
         Object newValue = record.value();
         if (record.value() instanceof Struct && columnMap != null && !columnMap.isEmpty()) {
             newValue = restoreColumnCase((Struct) record.value(), columnMap);

@@ -42,6 +42,12 @@ Without `SqlServerColumnNamingStrategy`, even with the SMT running:
 
 The naming strategy intercepts step 3 and returns `workItemId` instead, so `hasColumn()` succeeds.
 
+### Per-Table Column Resolution (ThreadLocal)
+
+`SqlServerColumnNamingStrategy.resolveColumnName()` only receives a field name — no table context. Without a table context it would use a flat cross-table column map, which causes false "missing column" errors when two tables share a same-lowercase column name with different actual case (e.g. `workItemData.createdAt` and `AnotherTable.CreatedAt` both hash to `createdat`).
+
+**Fix:** `SqlServerCaseRestorer.apply()` sets `SqlServerSchemaCache.CURRENT_TABLE_LOWER` (a `ThreadLocal<String>`) to the lowercase table name before each record is processed. `SqlServerColumnNamingStrategy.resolveColumnName()` reads it and does a per-table lookup in `columnCaseMaps` instead of the flat map. `WorkerSinkTask` runs the SMT chain and the sink on the same thread, so ThreadLocal context passes correctly. Falls back to the flat map when no table context is set.
+
 ### Required Setting: `quote.identifiers=true`
 
 This tells the JDBC sink to bracket-quote identifiers (e.g., `[workItemId]`). Without it, Debezium's dialect lowercases the resolved name before the `hasColumn()` check, undoing the fix.

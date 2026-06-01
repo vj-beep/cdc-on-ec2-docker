@@ -25,8 +25,23 @@ import java.util.concurrent.atomic.AtomicLong;
  * Reload-on-miss: if a column or table name is not found in the cache, a reload is triggered
  * (at most once per RELOAD_COOLDOWN_MS) to handle schema evolution without requiring a connector
  * restart. Reload failures are logged and swallowed — stale cache data remains valid.
+ *
+ * Table context: SqlServerCaseRestorer sets CURRENT_TABLE_LOWER before each record is processed.
+ * SqlServerColumnNamingStrategy reads it to do a per-table lookup instead of the cross-table flat
+ * map, avoiding false "missing column" errors when two tables share same-lowercase column names
+ * with different actual case (e.g. workItemData.createdAt vs TestCASE_INVENTORY.CreatedAt).
  */
 public final class SqlServerSchemaCache {
+
+    /**
+     * Set by SqlServerCaseRestorer.apply() to the lowercase table name of the record being
+     * processed. Read by SqlServerColumnNamingStrategy.resolveColumnName() to look up the
+     * per-table column map instead of the cross-table flat map.
+     *
+     * WorkerSinkTask runs the SMT chain and then calls sink.put() on the same thread, so
+     * ThreadLocal correctly passes context from the SMT to the NamingStrategy.
+     */
+    public static final ThreadLocal<String> CURRENT_TABLE_LOWER = new ThreadLocal<>();
 
     private static final Logger log = LoggerFactory.getLogger(SqlServerSchemaCache.class);
 
