@@ -1,22 +1,30 @@
-# Column Case Mapping for Bi-Directional CDC
+# Table and Column Case Mapping for Bi-Directional CDC
 
 ## What's the Problem?
 
-When you replicate data from Aurora PostgreSQL back to SQL Server, there's a column naming mismatch:
+When you replicate data from Aurora PostgreSQL back to SQL Server, there are two naming mismatches:
 
-- **Aurora** uses lowercase column names: `workitemid`, `dataxml` (PostgreSQL default)
-- **SQL Server** has camelCase column names: `workItemId`, `dataXml` (original source columns)
+**Table names:**
+- **Aurora** stores and exposes table names in lowercase: `workitemdata`, `testcase_inventory`
+- **SQL Server** has mixed-case table names: `workItemData`, `TestCASE_INVENTORY`
+- The Kafka topic tail produced by Debezium PostgreSQL source is always lowercase (e.g. `aurora.public.testcase_inventory`)
+- The JDBC sink uses the topic tail as the target table name — without correction it writes to a lowercase table that doesn't exist
 
-Without fixing this, the reverse CDC path fails because SQL Server can't find columns with lowercase names that don't exist in the target table.
+**Column names:**
+- **Aurora** uses lowercase column names: `workitemid`, `dataxml`, `createdat` (PostgreSQL default)
+- **SQL Server** has mixed-case column names: `workItemId`, `dataXml`, `CreatedAt`
+- Without fixing this, the reverse CDC path fails because SQL Server can't match lowercase column names to the target table's schema
+
+Both mismatches must be fixed together — correct table routing alone still writes lowercase column names that don't match the target schema.
 
 ⚠️ **Production Best Practice**
 
-The connector has `auto.create=true` and `auto.evolve=true` for POC convenience. However, **production deployments should:**
-- ✓ Pre-create all target tables on SQL Server with correct camelCase column names
-- ✓ Disable `auto.create` and `auto.evolve` for safety
+The reverse sink has `auto.create=false` and `schema.evolution=none`. **Production deployments must:**
+- ✓ Pre-create all target tables on SQL Server with correct mixed-case table and column names
+- ✓ Keep `auto.create=false` and `schema.evolution=none` to prevent uncontrolled schema changes
 - ✗ Never rely on auto-schema generation in production
 
-⚠️ **Why?** Auto-creation can silently create unwanted indexes, constraints, or data types that don't match your schema governance requirements.
+⚠️ **Why?** Auto-creation produces lowercase table and column names, defeating the entire purpose of this SMT. Schema evolution can silently add columns with wrong case or wrong data types.
 
 ## Architecture
 
@@ -25,7 +33,7 @@ Three components work together:
 | Component | Role | Where it runs |
 |---|---|---|
 | `SqlServerSchemaCache` | Shared static cache — one JDBC call loads all metadata | JVM-level singleton |
-| `SqlServerCaseRestorer` | Renames record fields + topic routing | Kafka Connect SMT chain |
+| `SqlServerCaseRestorer` | Renames topic tail (table name) + record field names (column names) | Kafka Connect SMT chain |
 | `SqlServerColumnNamingStrategy` | Resolves columns in Debezium's internal validation path | Debezium JDBC sink |
 
 All three are compiled into one JAR: `connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar`
