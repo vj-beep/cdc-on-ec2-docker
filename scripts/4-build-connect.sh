@@ -38,6 +38,77 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
     export HTTP_PROXY HTTPS_PROXY NO_PROXY
     cd "$SCRIPT_DIR"
 
+    # Diagnostics function for proxy issues
+    diagnose_proxy() {
+        echo ""
+        echo "[PROXY DIAGNOSTICS]"
+        echo "Proxy Config:"
+        echo "  HTTP_PROXY=${HTTP_PROXY:-<not set>}"
+        echo "  HTTPS_PROXY=${HTTPS_PROXY:-<not set>}"
+        echo "  NO_PROXY=${NO_PROXY:-<not set>}"
+
+        if [[ -z "$HTTP_PROXY" ]]; then
+            echo ""
+            echo "⚠️  WARNING: HTTP_PROXY is not set"
+            echo "   If Node 4 lacks direct internet, downloads may fail"
+            return 0
+        fi
+
+        # Extract proxy host and port
+        proxy_url="${HTTP_PROXY#*://}"
+        proxy_host="${proxy_url%%:*}"
+        proxy_port="${proxy_url##*:}"
+
+        echo ""
+        echo "Testing proxy connectivity..."
+
+        # Test 1: TCP connection to proxy
+        if timeout 3 bash -c "echo -n > /dev/tcp/$proxy_host/$proxy_port" 2>/dev/null; then
+            echo "  ✅ TCP connection to $proxy_host:$proxy_port OK"
+        else
+            echo "  ❌ CANNOT reach proxy at $proxy_host:$proxy_port"
+            echo "     Fix: Check network routing, firewalls, proxy host/port in .env"
+            return 1
+        fi
+
+        # Test 2: HTTP proxy functionality (GET request)
+        local proxy_test_resp
+        proxy_test_resp=$(curl -s -w "%{http_code}" --connect-timeout 5 --proxy "$HTTP_PROXY" http://httpbin.org/get 2>/dev/null | tail -c 3)
+        if [[ "$proxy_test_resp" == "200" ]]; then
+            echo "  ✅ HTTP proxy functionality OK (httpbin.org reachable)"
+        elif [[ "$proxy_test_resp" == "000" ]]; then
+            echo "  ⚠️  Cannot reach external sites through proxy"
+            echo "     Fix: Proxy may block external traffic, check proxy rules"
+            return 1
+        else
+            echo "  ⚠️  HTTP proxy returned status $proxy_test_resp"
+        fi
+
+        # Test 3: DNS resolution
+        if timeout 3 bash -c "getent hosts 8.8.8.8 > /dev/null" 2>/dev/null || ping -c 1 8.8.8.8 > /dev/null 2>&1; then
+            echo "  ✅ DNS/external connectivity OK"
+        else
+            echo "  ⚠️  DNS or external connectivity may be limited"
+        fi
+
+        # Test 4: Docker daemon proxy config
+        if systemctl is-active --quiet docker; then
+            docker_proxy_status=$(docker info 2>/dev/null | grep -i proxy || echo "Not configured")
+            if [[ "$docker_proxy_status" != "Not configured" ]]; then
+                echo "  ℹ️  Docker daemon proxy: $docker_proxy_status"
+            else
+                echo "  ℹ️  Docker daemon proxy: Not configured (will use shell env vars)"
+            fi
+        fi
+
+        echo ""
+        return 0
+    }
+
+    # Run proxy diagnostics first
+    diagnose_proxy || echo "[WARNING] Proxy diagnostics indicated issues"
+
+    echo "[TAR FILE VALIDATION]"
     # Validate Debezium tar files
     tar_files=(
         "connect/debezium-libs/debezium-connector-sqlserver-3.2.6.Final-plugin.tar.gz"
@@ -46,18 +117,30 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
     )
 
     tar_errors=0
-    for tar_file in "${tar_files[@]}"; do
+    tar_expected_sizes=(2900000 4600000 29400000)  # Approximate expected sizes
+    for idx in "${!tar_files[@]}"; do
+        tar_file="${tar_files[$idx]}"
         if [[ ! -f "$tar_file" ]]; then
             echo "   ❌ Missing: $tar_file"
             tar_errors=$((tar_errors + 1))
         else
             size=$(stat -f%z "$tar_file" 2>/dev/null || stat -c%s "$tar_file" 2>/dev/null)
             size_mb=$((size / 1024 / 1024))
+            expected_mb=$((tar_expected_sizes[$idx] / 1024 / 1024))
+
             # Verify file is gzip format
             if file "$tar_file" | grep -q "gzip compressed"; then
-                echo "   ✅ $tar_file ($size_mb MB, valid gzip)"
+                # Check size is reasonable (within 10% of expected)
+                if [[ $size -lt $((tar_expected_sizes[$idx] * 90 / 100)) ]]; then
+                    echo "   ⚠️  $tar_file ($size_mb MB, UNDERSIZED - expected ~${expected_mb}M)"
+                    echo "       Likely cause: Incomplete download (network/proxy issue)"
+                    tar_errors=$((tar_errors + 1))
+                else
+                    echo "   ✅ $tar_file ($size_mb MB, valid gzip)"
+                fi
             else
                 echo "   ❌ $tar_file ($size_mb MB, INVALID FORMAT — not gzip)"
+                echo "       Likely cause: Corrupted download or transferred as binary"
                 tar_errors=$((tar_errors + 1))
             fi
         fi
@@ -101,18 +184,44 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
         echo "=== Full log saved to: $build_log ==="
         echo ""
         echo "[DIAGNOSTICS]"
-        echo "1. Check tar file integrity:"
+        echo "1. Tar file integrity:"
         for tar_file in "${tar_files[@]}"; do
             if [[ -f "$tar_file" ]]; then
                 tar tzf "$tar_file" > /dev/null 2>&1 && echo "   ✅ $tar_file is valid" || echo "   ❌ $tar_file is CORRUPTED"
             fi
         done
+
         echo ""
-        echo "[ACTIONS]"
-        echo "1. Re-run 2a-deploy-repo.sh to re-clone fresh files"
-        echo "2. Verify proxy connectivity: curl -v --proxy $HTTP_PROXY http://example.com"
-        echo "3. Check disk space: df -h"
-        echo "4. Re-run this script"
+        echo "2. Proxy configuration:"
+        echo "   HTTP_PROXY=${HTTP_PROXY:-<not set>}"
+        echo "   HTTPS_PROXY=${HTTPS_PROXY:-<not set>}"
+        echo "   NO_PROXY=${NO_PROXY:-<not set>}"
+
+        echo ""
+        echo "[ROOT CAUSE ANALYSIS]"
+        if grep -q "gzip: stdin: not in gzip format" "$build_log"; then
+            echo "❌ Gzip decompression failed"
+            echo "   Causes:"
+            echo "   - Tar file corrupted during download (network/proxy issue)"
+            echo "   - File transferred as text instead of binary"
+            echo "   - Proxy modified content in transit"
+            echo ""
+        fi
+
+        echo "[REMEDIATION STEPS]"
+        echo "1. Re-run 2a-deploy-repo.sh to re-clone all files fresh:"
+        echo "   ./scripts/2a-deploy-repo.sh"
+        echo ""
+        echo "2. Verify proxy is working from Node 4:"
+        echo "   curl -v --proxy \$HTTP_PROXY http://httpbin.org/get"
+        echo ""
+        echo "3. If proxy fails, check:"
+        echo "   - Proxy host/port in .env (should be: $HTTP_PROXY)"
+        echo "   - Network connectivity to proxy from Node 4"
+        echo "   - Proxy firewall rules (may be blocking certain destinations)"
+        echo ""
+        echo "4. After fixing, re-run:"
+        echo "   ./scripts/4-build-connect.sh"
         exit 1
     fi
 fi
@@ -145,18 +254,25 @@ if [[ "$DISPATCH_MODE" == "ssh" ]]; then
         -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
         "${DEPLOY_USER}@${CONNECT_1_IP}" \
         "cd ${DEPLOY_DIR} && source ${DEPLOY_DIR}/.env && export HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy=\${HTTP_PROXY} https_proxy=\${HTTPS_PROXY} no_proxy=\${NO_PROXY} && \
+        echo '[*] Proxy diagnostics...' && \
+        if [[ -n \"\${HTTP_PROXY}\" ]]; then \
+          proxy_host=\$(echo \${HTTP_PROXY#*://} | cut -d: -f1); \
+          proxy_port=\$(echo \${HTTP_PROXY#*://} | cut -d: -f2); \
+          timeout 3 bash -c \"echo -n > /dev/tcp/\$proxy_host/\$proxy_port\" 2>/dev/null && echo \"   ✅ Proxy reachable (\$proxy_host:\$proxy_port)\" || { echo \"   ❌ CANNOT reach proxy at \$proxy_host:\$proxy_port\"; echo \"   Fix: Check network routing, firewall rules\"; exit 1; }; \
+        else echo \"   ⚠️  No proxy configured (may fail if no direct internet)\"; fi && \
         echo '[*] Pre-flight validation...' && \
         for f in connect/debezium-libs/debezium-connector-*.tar.gz; do \
           if [[ -f \"\$f\" ]]; then \
             sz=\$(stat -c%s \"\$f\" 2>/dev/null || stat -f%z \"\$f\" 2>/dev/null); \
-            echo \"   ✅ \$(basename \$f) (\$((sz/1024/1024))M)\"; \
-            file \"\$f\" | grep -q 'gzip' || echo \"   ❌ \$(basename \$f) NOT gzip format\"; \
+            if file \"\$f\" | grep -q 'gzip'; then \
+              echo \"   ✅ \$(basename \$f) (\$((sz/1024/1024))M)\"; \
+            else echo \"   ❌ \$(basename \$f) (\$((sz/1024/1024))M, INVALID gzip format)\"; fi; \
           else echo \"   ❌ Missing: \$f\"; fi; \
         done && \
         [[ -f connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar ]] && echo '   ✅ kafka-connect-sqlserver-case-restorer JAR' || echo '   ❌ Missing case restorer JAR' && \
         echo '[*] Building Docker image...' && \
         DOCKER_BUILDKIT=0 docker compose --env-file ${DEPLOY_DIR}/.env -f docker-compose.connect-build.yml build > /tmp/docker-build.log 2>&1 || \
-        { echo '[ERROR] Build failed'; echo '=== Build log (last 50 lines) ==='; tail -50 /tmp/docker-build.log; echo '=== Diagnostics ==='; \
+        { echo '[ERROR] Build failed'; echo '=== Build log (last 50 lines) ==='; tail -50 /tmp/docker-build.log; echo '=== Proxy config ==='; echo \"HTTP_PROXY=\${HTTP_PROXY}\"; echo \"HTTPS_PROXY=\${HTTPS_PROXY}\"; echo '=== Diagnostics ==='; \
           for f in connect/debezium-libs/debezium-connector-*.tar.gz; do tar tzf \"\$f\" > /dev/null 2>&1 && echo \"✅ \$(basename \$f) valid\" || echo \"❌ \$(basename \$f) CORRUPTED\"; done; exit 1; } && \
         docker images | grep cdc-connect" 2>&1
 
@@ -191,11 +307,13 @@ else
 {
   "commands": [
     "cd ${DEPLOY_DIR} && source ${DEPLOY_DIR}/.env && export HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} no_proxy=${NO_PROXY}",
+    "echo '[*] Proxy diagnostics...'",
+    "if [[ -n \"${HTTP_PROXY}\" ]]; then proxy_host=$(echo ${HTTP_PROXY#*://} | cut -d: -f1); proxy_port=$(echo ${HTTP_PROXY#*://} | cut -d: -f2); timeout 3 bash -c \"echo -n > /dev/tcp/$proxy_host/$proxy_port\" 2>/dev/null && echo \"   ✅ Proxy reachable ($proxy_host:$proxy_port)\" || { echo \"   ❌ CANNOT reach proxy at $proxy_host:$proxy_port\"; echo \"   Fix: Check network routing, firewall\"; exit 1; }; else echo \"   ⚠️  No proxy configured\"; fi",
     "echo '[*] Pre-flight validation...'",
-    "for f in ${DEPLOY_DIR}/connect/debezium-libs/debezium-connector-*.tar.gz; do if [[ -f \"$f\" ]]; then sz=$(stat -c%s \"$f\" 2>/dev/null || stat -f%z \"$f\" 2>/dev/null); echo \"   ✅ $(basename $f) ($(($sz/1024/1024))M)\"; file \"$f\" | grep -q 'gzip' || echo \"   ❌ $(basename $f) NOT gzip format\"; else echo \"   ❌ Missing: $f\"; fi; done",
+    "for f in ${DEPLOY_DIR}/connect/debezium-libs/debezium-connector-*.tar.gz; do if [[ -f \"$f\" ]]; then sz=$(stat -c%s \"$f\" 2>/dev/null || stat -f%z \"$f\" 2>/dev/null); if file \"$f\" | grep -q 'gzip'; then echo \"   ✅ $(basename $f) ($(($sz/1024/1024))M)\"; else echo \"   ❌ $(basename $f) ($(($sz/1024/1024))M, INVALID gzip)\"; fi; else echo \"   ❌ Missing: $f\"; fi; done",
     "[[ -f ${DEPLOY_DIR}/connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar ]] && echo '   ✅ kafka-connect-sqlserver-case-restorer JAR' || echo '   ❌ Missing case restorer JAR'",
     "echo '[*] Building Docker image...'",
-    "DOCKER_BUILDKIT=0 docker compose --env-file ${DEPLOY_DIR}/.env -f docker-compose.connect-build.yml build > /tmp/docker-build.log 2>&1 || { echo '[ERROR] Build failed'; echo '=== Build log (last 50 lines) ==='; tail -50 /tmp/docker-build.log; echo '=== Diagnostics ==='; for f in ${DEPLOY_DIR}/connect/debezium-libs/debezium-connector-*.tar.gz; do tar tzf \"$f\" > /dev/null 2>&1 && echo \"✅ $(basename $f) valid\" || echo \"❌ $(basename $f) CORRUPTED\"; done; exit 1; }",
+    "DOCKER_BUILDKIT=0 docker compose --env-file ${DEPLOY_DIR}/.env -f docker-compose.connect-build.yml build > /tmp/docker-build.log 2>&1 || { echo '[ERROR] Build failed'; echo '=== Build log (last 50 lines) ==='; tail -50 /tmp/docker-build.log; echo '=== Proxy config ==='; echo \"HTTP_PROXY=${HTTP_PROXY}\"; echo \"HTTPS_PROXY=${HTTPS_PROXY}\"; echo '=== Diagnostics ==='; for f in ${DEPLOY_DIR}/connect/debezium-libs/debezium-connector-*.tar.gz; do tar tzf \"$f\" > /dev/null 2>&1 && echo \"✅ $(basename $f) valid\" || echo \"❌ $(basename $f) CORRUPTED\"; done; exit 1; }",
     "docker images | grep cdc-connect"
   ],
   "executionTimeout": ["600"]

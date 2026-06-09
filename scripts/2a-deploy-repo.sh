@@ -62,6 +62,85 @@ if [[ "${1:-}" == "--local" ]]; then
         export HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}"
     fi
 
+    # Proxy diagnostics function
+    diagnose_proxy_for_git() {
+        echo ""
+        echo "[PROXY DIAGNOSTICS FOR GIT CLONE]"
+
+        if [[ -z "$HTTP_PROXY" ]]; then
+            echo "   ℹ️  No proxy configured (direct internet access assumed)"
+            return 0
+        fi
+
+        # Extract proxy host and port
+        proxy_url="${HTTP_PROXY#*://}"
+        proxy_host="${proxy_url%%:*}"
+        proxy_port="${proxy_url##*:}"
+
+        echo "   Proxy: $HTTP_PROXY"
+        echo "   Target: $repo_url"
+        echo ""
+
+        # Test 1: TCP connection to proxy
+        echo "   1. Testing TCP connection to proxy..."
+        if timeout 5 bash -c "echo -n > /dev/tcp/$proxy_host/$proxy_port" 2>/dev/null; then
+            echo "      ✅ Can reach proxy at $proxy_host:$proxy_port"
+        else
+            echo "      ❌ CANNOT reach proxy at $proxy_host:$proxy_port"
+            echo "         Fix: Check network routing, security groups, firewall"
+            return 1
+        fi
+
+        # Test 2: HTTPS CONNECT through proxy (required for git clone over HTTPS)
+        echo ""
+        echo "   2. Testing HTTPS CONNECT through proxy (for git)..."
+        if timeout 10 curl -v --proxy "$HTTP_PROXY" --connect-timeout 5 https://github.com 2>&1 | grep -q "Connected to proxy"; then
+            echo "      ✅ Proxy accepts HTTPS CONNECT tunneling"
+        else
+            # Try alternative test with curl head request
+            local curl_test
+            curl_test=$(timeout 10 curl -sI --proxy "$HTTP_PROXY" --connect-timeout 5 https://github.com 2>&1)
+            if echo "$curl_test" | grep -qi "HTTP\|302\|301"; then
+                echo "      ✅ Proxy allows HTTPS traffic to github.com"
+            else
+                echo "      ⚠️  Proxy may not support HTTPS CONNECT or is blocking github.com"
+                echo "         Output: $(echo "$curl_test" | head -3 | tr '\n' ' ')"
+                echo ""
+                echo "         Common issues:"
+                echo "         - Proxy doesn't support CONNECT tunneling (required for HTTPS)"
+                echo "         - Proxy is blocking github.com explicitly"
+                echo "         - Proxy requires authentication (not set in .env)"
+                echo "         - Firewall between this node and proxy"
+                return 1
+            fi
+        fi
+
+        # Test 3: Test git clone over HTTP (fallback if HTTPS fails)
+        echo ""
+        echo "   3. Testing git connectivity..."
+        local http_repo="${repo_url/https:\/\//http:\/\/}"
+        if timeout 15 git ls-remote "$http_repo" HEAD > /dev/null 2>&1; then
+            echo "      ✅ Git can reach repo (at least via HTTP)"
+        else
+            echo "      ⚠️  Git connectivity test inconclusive"
+        fi
+
+        echo ""
+        return 0
+    }
+
+    # Run diagnostics before attempting clone
+    diagnose_proxy_for_git || {
+        echo ""
+        echo "[REMEDIATION]"
+        echo "Option 1: Configure proxy to allow HTTPS CONNECT (proxy admin task)"
+        echo "Option 2: Use SSH-based git clone if available"
+        echo "Option 3: Check proxy firewall rules for github.com"
+        echo ""
+        echo "Attempting clone anyway... (may fail)"
+        echo ""
+    }
+
     which git >/dev/null 2>&1 || dnf install -y git
     mkdir -p "$deploy_home"
     # Backup existing .env before wiping the repo directory
@@ -172,13 +251,16 @@ REMOTE_EOF
             --arg ref_flag "$ref_flag" \
             --arg user "$DEPLOY_USER" \
             --arg dir "$DEPLOY_DIR" \
+            --arg http_proxy "$HTTP_PROXY" \
             '{commands: [
                 $proxy,
+                "echo \"[*] Proxy diagnostics for git clone...\"",
+                "if [[ -n \"$http_proxy\" ]]; then proxy_host=$(echo $http_proxy | cut -d: -f2 | tr -d /); proxy_port=$(echo $http_proxy | cut -d: -f3); echo \"   Testing proxy: $proxy_host:$proxy_port\"; timeout 5 bash -c \"echo -n > /dev/tcp/$proxy_host/$proxy_port\" && echo \"   ✅ Proxy reachable\" || echo \"   ❌ CANNOT reach proxy at $proxy_host:$proxy_port\"; else echo \"   ℹ️  No proxy configured (direct internet assumed)\"; fi",
                 "which git >/dev/null 2>&1 || dnf install -y git",
                 ("mkdir -p " + $deploy_home),
                 ("if [ -f " + $dir + "/.env ]; then cp " + $dir + "/.env " + $deploy_home + "/.env.$(date +%Y%m%d_%H%M%S) && echo Backed up .env; fi"),
                 ("rm -rf " + $dir + " 2>/dev/null || true"),
-                ("git clone " + $ref_flag + (if $ref_flag != "" then " " else "" end) + $repo + " " + $dir),
+                ("echo \"[*] Cloning repo: " + $repo + "\" && git clone " + $ref_flag + (if $ref_flag != "" then " " else "" end) + $repo + " " + $dir + " 2>&1 || { echo \"[ERROR] Git clone failed\"; echo \"If proxy issue, check: proxy allows HTTPS CONNECT, firewall, github.com not blocked\"; exit 1; }"),
                 ("chown -R " + $user + ":" + $user + " " + $dir),
                 ("latest=$(ls -t " + $deploy_home + "/.env.* 2>/dev/null | head -1) && [ -n \"$latest\" ] && cp \"$latest\" " + $dir + "/.env && echo Restored .env from $latest || true"),
                 ("ls -lh " + $dir + "/docker-compose.yml")
@@ -231,19 +313,39 @@ REMOTE_EOF
                 return 0
             else
                 echo "   ❌ $node_name deployment FAILED (docker-compose.yml not found)"
-                echo "   Output: $(echo "$verify_output" | tail -3 | tr '\n' ' ')"
+                echo "   Last output: $(echo "$verify_output" | tail -3 | tr '\n' ' ')"
                 return 1
             fi
         elif [[ "$status" == "Failed" ]]; then
             echo "   ❌ $node_name deployment FAILED"
-            local error_output
+            local stdout_output error_output
+            stdout_output=$(aws ssm get-command-invocation \
+                --region "$AWS_REGION" \
+                --command-id "$cmd_id" \
+                --instance-id "$node_addr" \
+                --query 'StandardOutputContent' \
+                --output text 2>/dev/null)
             error_output=$(aws ssm get-command-invocation \
                 --region "$AWS_REGION" \
                 --command-id "$cmd_id" \
                 --instance-id "$node_addr" \
                 --query 'StandardErrorContent' \
                 --output text 2>/dev/null)
-            [[ -n "$error_output" ]] && echo "   Error: $error_output"
+
+            # Check for proxy-related errors
+            if echo "$error_output" | grep -qi "Failed to connect\|proxy\|443"; then
+                echo "   [PROXY ERROR DETECTED]"
+                echo "   Git failed to reach github.com via proxy"
+                echo "   Error snippet: $(echo "$error_output" | grep -i "failed\|proxy" | head -1)"
+                echo ""
+                echo "   Diagnostics:"
+                echo "   - Proxy reachability: $(echo "$stdout_output" | grep -E "✅|❌" | head -1)"
+                echo "   - Check: proxy allows HTTPS CONNECT tunneling for git"
+                echo "   - Check: firewall rules between node and proxy"
+                echo "   - Check: proxy not blocking github.com"
+            else
+                [[ -n "$error_output" ]] && echo "   Error: $(echo "$error_output" | head -3 | tr '\n' ' ')"
+            fi
             return 1
         else
             echo "   ⚠️  $node_name deployment status: $status (timeout after ${timeout}s)"
