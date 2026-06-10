@@ -252,6 +252,21 @@ case $NODE in
         echo "⚠️  .env or prometheus.yml.template not found — Prometheus may not scrape correctly"
     fi
 
+    # Remove stale named volumes whose backing path no longer exists (e.g. after NVMe reformat).
+    # Docker reports "error evaluating symlinks from mount source: no such file or directory"
+    # at container start if the volume's internal symlink is broken. Safe to remove — data is
+    # ephemeral (metrics/dashboards rebuild on first run).
+    for vol in prometheus-data grafana-data; do
+        full_vol="cdc-on-ec2-docker_${vol}"
+        if docker volume inspect "$full_vol" &>/dev/null; then
+            mount_path=$(docker volume inspect "$full_vol" --format '{{ .Mountpoint }}' 2>/dev/null)
+            if [[ -n "$mount_path" ]] && ! stat "$mount_path" &>/dev/null; then
+                echo "⚠️  Removing stale volume $full_vol (mount path missing: $mount_path)"
+                docker volume rm "$full_vol" 2>/dev/null || true
+            fi
+        fi
+    done
+
     bash monitoring/jmx-exporter/download-jmx-agent.sh
     docker compose -f docker-compose.yml -f docker-compose.ksqldb-monitoring.yml \
       up -d control-center ksqldb-server rest-proxy flink-jobmanager flink-taskmanager \
