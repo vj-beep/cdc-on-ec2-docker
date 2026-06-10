@@ -303,23 +303,23 @@ else
 
     echo "[*] Instance ID: $instance_id"
 
-    cmd_json=$(jq -c . <<'JSONEOF'
-{
+    # Single &&-chained command so sourced proxy vars stay in scope for docker build
+    cmd_json=$(jq -cn --arg d "$DEPLOY_DIR" '{
   "commands": [
-    "cd ${DEPLOY_DIR} && source ${DEPLOY_DIR}/.env && export HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} no_proxy=${NO_PROXY}",
-    "echo '[*] Proxy diagnostics...'",
-    "if [[ -n \"${HTTP_PROXY}\" ]]; then proxy_host=$(echo ${HTTP_PROXY#*://} | cut -d: -f1); proxy_port=$(echo ${HTTP_PROXY#*://} | cut -d: -f2); timeout 3 bash -c \"echo -n > /dev/tcp/$proxy_host/$proxy_port\" 2>/dev/null && echo \"   ✅ Proxy reachable ($proxy_host:$proxy_port)\" || { echo \"   ❌ CANNOT reach proxy at $proxy_host:$proxy_port\"; echo \"   Fix: Check network routing, firewall\"; exit 1; }; else echo \"   ⚠️  No proxy configured\"; fi",
-    "echo '[*] Pre-flight validation...'",
-    "for f in ${DEPLOY_DIR}/connect/debezium-libs/debezium-connector-*.tar.gz; do if [[ -f \"$f\" ]]; then sz=$(stat -c%s \"$f\" 2>/dev/null || stat -f%z \"$f\" 2>/dev/null); if file \"$f\" | grep -q 'gzip'; then echo \"   ✅ $(basename $f) ($(($sz/1024/1024))M)\"; else echo \"   ❌ $(basename $f) ($(($sz/1024/1024))M, INVALID gzip)\"; fi; else echo \"   ❌ Missing: $f\"; fi; done",
-    "[[ -f ${DEPLOY_DIR}/connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar ]] && echo '   ✅ kafka-connect-sqlserver-case-restorer JAR' || echo '   ❌ Missing case restorer JAR'",
-    "echo '[*] Building Docker image...'",
-    "DOCKER_BUILDKIT=0 docker compose --env-file ${DEPLOY_DIR}/.env -f docker-compose.connect-build.yml build > /tmp/docker-build.log 2>&1 || { echo '[ERROR] Build failed'; echo '=== Build log (last 50 lines) ==='; tail -50 /tmp/docker-build.log; echo '=== Proxy config ==='; echo \"HTTP_PROXY=${HTTP_PROXY}\"; echo \"HTTPS_PROXY=${HTTPS_PROXY}\"; echo '=== Diagnostics ==='; for f in ${DEPLOY_DIR}/connect/debezium-libs/debezium-connector-*.tar.gz; do tar tzf \"$f\" > /dev/null 2>&1 && echo \"✅ $(basename $f) valid\" || echo \"❌ $(basename $f) CORRUPTED\"; done; exit 1; }",
-    "docker images | grep cdc-connect"
+    ("set -e" +
+     " && cd " + $d +
+     " && source " + $d + "/.env" +
+     " && export HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY} no_proxy=${NO_PROXY}" +
+     " && echo '\''[*] Proxy: HTTP_PROXY=${HTTP_PROXY:-<not set>}'\''" +
+     " && echo '\''[*] Pre-flight validation...'\''" +
+     " && for f in " + $d + "/connect/debezium-libs/debezium-connector-*.tar.gz; do if [[ -f \"$f\" ]]; then sz=$(stat -c%s \"$f\" 2>/dev/null || stat -f%z \"$f\" 2>/dev/null); if file \"$f\" | grep -q gzip; then echo \"   OK $(basename $f) ($(($sz/1024/1024))M)\"; else echo \"   INVALID $(basename $f) not gzip\"; exit 1; fi; else echo \"   Missing: $f\"; exit 1; fi; done" +
+     " && { [[ -f " + $d + "/connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar ]] && echo '\''   OK case-restorer JAR'\'' || { echo '\''   Missing case-restorer JAR'\''; exit 1; }; }" +
+     " && echo '\''[*] Building Docker image...'\''" +
+     " && DOCKER_BUILDKIT=0 docker compose --env-file " + $d + "/.env -f docker-compose.connect-build.yml build > /tmp/docker-build.log 2>&1 || { echo '\''[ERROR] Build failed'\''; tail -50 /tmp/docker-build.log; echo \"HTTP_PROXY=${HTTP_PROXY:-<not set>}\"; for f in " + $d + "/connect/debezium-libs/debezium-connector-*.tar.gz; do tar tzf \"$f\" > /dev/null 2>&1 && echo \"OK $(basename $f)\" || echo \"CORRUPTED $(basename $f)\"; done; exit 1; }" +
+     " && docker images | grep cdc-connect")
   ],
   "executionTimeout": ["600"]
-}
-JSONEOF
-)
+}')
 
     cmd_id=$(aws ssm send-command \
         --region "$AWS_REGION" \

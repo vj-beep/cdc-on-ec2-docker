@@ -143,21 +143,65 @@ if [[ "${1:-}" == "--local" ]]; then
 
     which git >/dev/null 2>&1 || dnf install -y git
     mkdir -p "$deploy_home"
-    # Backup existing .env before wiping the repo directory
-    if [[ -f "$deploy_dir/.env" ]]; then
-        env_backup="${deploy_home}/.env.$(date +%Y%m%d_%H%M%S)"
-        cp "$deploy_dir/.env" "$env_backup"
-        echo "   📦 Backed up .env to $env_backup"
-    fi
-    rm -rf "$deploy_dir" 2>/dev/null || true
-    ref_args=(); [[ -n "${PUBLIC_REPO_TAG:-}" ]] && ref_args=(--branch "$PUBLIC_REPO_TAG" --depth 1)
-    git clone "${ref_args[@]}" "$repo_url" "$deploy_dir"
-    chown -R "${deploy_user}:${deploy_user}" "$deploy_dir"
+
+    MAX_RETRIES=3
+    attempt=0
+    while [[ $attempt -lt $MAX_RETRIES ]]; do
+        attempt=$((attempt + 1))
+        [[ $attempt -gt 1 ]] && echo "[*] Retry $attempt/$MAX_RETRIES (tarball corruption detected)..."
+
+        # Backup existing .env before wiping
+        if [[ -f "$deploy_dir/.env" ]]; then
+            env_backup="${deploy_home}/.env.$(date +%Y%m%d_%H%M%S)"
+            cp "$deploy_dir/.env" "$env_backup"
+            echo "   Backed up .env to $env_backup"
+        fi
+
+        rm -rf "$deploy_dir" 2>/dev/null || true
+        ref_args=(); [[ -n "${PUBLIC_REPO_TAG:-}" ]] && ref_args=(--branch "$PUBLIC_REPO_TAG" --depth 1)
+
+        if ! git clone "${ref_args[@]}" "$repo_url" "$deploy_dir"; then
+            echo "[ERROR] Git clone failed on attempt $attempt"
+            [[ $attempt -ge $MAX_RETRIES ]] && exit 1
+            continue
+        fi
+
+        chown -R "${deploy_user}:${deploy_user}" "$deploy_dir"
+
+        # Validate tarballs — proxy truncation produces a truncated file that passes
+        # COPY but explodes in tar during docker build. Catch it here while we can retry.
+        echo "[*] Validating tarballs..."
+        tarball_ok=true
+        for f in "$deploy_dir"/connect/debezium-libs/debezium-connector-*.tar.gz; do
+            sz=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null || echo 0)
+            if tar -tzf "$f" > /dev/null 2>&1; then
+                echo "   ✅ $(basename "$f") ($((sz / 1024 / 1024))M)"
+            else
+                echo "   ❌ $(basename "$f") ($((sz / 1024 / 1024))M) — corrupt, proxy likely truncated during clone"
+                tarball_ok=false
+            fi
+        done
+
+        if $tarball_ok; then
+            break
+        fi
+
+        if [[ $attempt -ge $MAX_RETRIES ]]; then
+            echo ""
+            echo "[ERROR] Tarballs still corrupt after $MAX_RETRIES attempts"
+            echo "   Root cause: proxy is truncating large binaries during git clone"
+            echo "   Fix options:"
+            echo "   1. Switch to SSH clone: set PUBLIC_REPO_URL=git@github.com:... in .env"
+            echo "   2. Increase proxy timeout/buffer limits (proxy admin task)"
+            exit 1
+        fi
+    done
+
     # Restore most recent .env backup
     latest_backup=$(ls -t "${deploy_home}"/.env.* 2>/dev/null | head -1)
     if [[ -n "$latest_backup" ]]; then
         cp "$latest_backup" "$deploy_dir/.env"
-        echo "   ✅ Restored .env from $latest_backup"
+        echo "   Restored .env from $latest_backup"
     fi
     ls -lh "$deploy_dir/docker-compose.yml"
     echo "✅ Repo cloned to $deploy_dir"
@@ -199,6 +243,7 @@ deploy_to_node() {
     local node_name="$1"
     local node_addr="$2"
     local repo_url="$3"
+    local validate_tarballs="${4:-false}"  # only true for connect node
 
     echo "🚀 Deploying to $node_name ($node_addr)..."
 
@@ -245,24 +290,35 @@ REMOTE_EOF
         local cmd_json
         local ref_flag=""
         [[ -n "${PUBLIC_REPO_TAG:-}" ]] && ref_flag="--branch ${PUBLIC_REPO_TAG} --depth 1"
-        cmd_json=$(jq -n --arg proxy "$proxy_cmd" \
+
+        local clone_cmd="git clone ${ref_flag:+$ref_flag }${repo_url} ${DEPLOY_DIR} 2>&1 || { echo '[ERROR] Git clone failed'; exit 1; }"
+
+        # Tarball validation command (connect node only — empty string for others)
+        local validate_cmd="echo '[*] Skipping tarball validation (not connect node)'"
+        if [[ "$validate_tarballs" == "true" ]]; then
+            validate_cmd="echo '[*] Validating tarballs...' && ok=true && for f in ${DEPLOY_DIR}/connect/debezium-libs/debezium-connector-*.tar.gz; do sz=\$(stat -c%s \"\$f\" 2>/dev/null || echo 0); if tar -tzf \"\$f\" > /dev/null 2>&1; then echo \"   OK \$(basename \$f) (\$((sz/1024/1024))M)\"; else echo \"   CORRUPT \$(basename \$f) (\$((sz/1024/1024))M) — proxy truncated during clone\"; ok=false; fi; done && \$ok || { echo '[ERROR] Tarball validation failed — re-run 2a-deploy-repo.sh to retry'; exit 1; }"
+        fi
+
+        cmd_json=$(jq -n \
+            --arg proxy "$proxy_cmd" \
             --arg deploy_home "$(dirname "$DEPLOY_DIR")" \
             --arg repo "$repo_url" \
-            --arg ref_flag "$ref_flag" \
             --arg user "$DEPLOY_USER" \
             --arg dir "$DEPLOY_DIR" \
-            --arg http_proxy "$HTTP_PROXY" \
+            --arg http_proxy "${HTTP_PROXY:-}" \
+            --arg clone_cmd "$clone_cmd" \
+            --arg validate_cmd "$validate_cmd" \
             '{commands: [
                 $proxy,
-                "echo \"[*] Proxy diagnostics for git clone...\"",
-                "if [[ -n \"$http_proxy\" ]]; then proxy_host=$(echo $http_proxy | cut -d: -f2 | tr -d /); proxy_port=$(echo $http_proxy | cut -d: -f3); echo \"   Testing proxy: $proxy_host:$proxy_port\"; timeout 5 bash -c \"echo -n > /dev/tcp/$proxy_host/$proxy_port\" && echo \"   ✅ Proxy reachable\" || echo \"   ❌ CANNOT reach proxy at $proxy_host:$proxy_port\"; else echo \"   ℹ️  No proxy configured (direct internet assumed)\"; fi",
+                "if [[ -n \"\($http_proxy)\" ]]; then proxy_host=$(echo \($http_proxy) | cut -d: -f2 | tr -d /); proxy_port=$(echo \($http_proxy) | cut -d: -f3); echo \"   Testing proxy: $proxy_host:$proxy_port\"; timeout 5 bash -c \"echo -n > /dev/tcp/$proxy_host/$proxy_port\" && echo \"   Proxy reachable\" || echo \"   CANNOT reach proxy at $proxy_host:$proxy_port\"; else echo \"   No proxy configured\"; fi",
                 "which git >/dev/null 2>&1 || dnf install -y git",
                 ("mkdir -p " + $deploy_home),
                 ("if [ -f " + $dir + "/.env ]; then cp " + $dir + "/.env " + $deploy_home + "/.env.$(date +%Y%m%d_%H%M%S) && echo Backed up .env; fi"),
                 ("rm -rf " + $dir + " 2>/dev/null || true"),
-                ("echo \"[*] Cloning repo: " + $repo + "\" && git clone " + $ref_flag + (if $ref_flag != "" then " " else "" end) + $repo + " " + $dir + " 2>&1 || { echo \"[ERROR] Git clone failed\"; echo \"If proxy issue, check: proxy allows HTTPS CONNECT, firewall, github.com not blocked\"; exit 1; }"),
+                $clone_cmd,
                 ("chown -R " + $user + ":" + $user + " " + $dir),
                 ("latest=$(ls -t " + $deploy_home + "/.env.* 2>/dev/null | head -1) && [ -n \"$latest\" ] && cp \"$latest\" " + $dir + "/.env && echo Restored .env from $latest || true"),
+                $validate_cmd,
                 ("ls -lh " + $dir + "/docker-compose.yml")
             ]}'
         )
@@ -356,7 +412,10 @@ REMOTE_EOF
 
 failed=0
 for i in "${!NODE_NAMES[@]}"; do
-    if ! deploy_to_node "${NODE_NAMES[$i]}" "${NODE_ADDRS[$i]}" "$PUBLIC_REPO_URL"; then
+    # Only the connect node (index 3) needs the debezium tarballs validated
+    validate="false"
+    [[ "${NODE_NAMES[$i]}" == "connect" ]] && validate="true"
+    if ! deploy_to_node "${NODE_NAMES[$i]}" "${NODE_ADDRS[$i]}" "$PUBLIC_REPO_URL" "$validate"; then
         failed=$((failed + 1))
     fi
 done
