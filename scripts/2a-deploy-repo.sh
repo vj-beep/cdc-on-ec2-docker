@@ -421,6 +421,80 @@ for i in "${!NODE_NAMES[@]}"; do
 done
 
 echo ""
+
+# ============================================================
+# Post-Deployment Diagnostics
+# ============================================================
+if [[ $failed -eq 0 ]]; then
+    echo "[*] Phase 2a diagnostics..."
+    echo ""
+
+    diag_failed=0
+
+    # Check repo integrity on jumpbox
+    echo "  📋 Repo integrity:"
+    if [[ -d "$SCRIPT_DIR/.git" ]]; then
+        echo "     ✅ .git directory present"
+    else
+        echo "     ❌ .git directory missing"
+        diag_failed=$((diag_failed + 1))
+    fi
+
+    # Check critical files
+    for f in docker-compose.yml .env.template scripts/3-setup-ec2.sh scripts/4-build-connect.sh; do
+        if [[ -f "$SCRIPT_DIR/$f" ]]; then
+            echo "     ✅ $f"
+        else
+            echo "     ❌ $f MISSING"
+            diag_failed=$((diag_failed + 1))
+        fi
+    done
+
+    # Check tarball integrity
+    echo ""
+    echo "  📦 Debezium tarballs:"
+    for f in "$SCRIPT_DIR"/connect/debezium-libs/debezium-connector-*.tar.gz; do
+        if [[ -f "$f" ]]; then
+            if tar -tzf "$f" > /dev/null 2>&1; then
+                sz=$(($(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null) / 1024 / 1024))
+                echo "     ✅ $(basename $f) ($sz MB, valid gzip)"
+            else
+                echo "     ❌ $(basename $f) CORRUPTED (invalid gzip)"
+                diag_failed=$((diag_failed + 1))
+            fi
+        else
+            echo "     ❌ $(basename $f) MISSING"
+            diag_failed=$((diag_failed + 1))
+        fi
+    done
+
+    # Check case restorer JAR
+    echo ""
+    echo "  🔧 Pre-built JARs:"
+    if [[ -f "$SCRIPT_DIR/connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar" ]]; then
+        echo "     ✅ kafka-connect-sqlserver-case-restorer-1.0.0.jar"
+    else
+        echo "     ❌ kafka-connect-sqlserver-case-restorer-1.0.0.jar MISSING"
+        diag_failed=$((diag_failed + 1))
+    fi
+
+    if [[ -f "$SCRIPT_DIR/connect/jars/mssql-jdbc-12.4.2.jre11.jar" ]]; then
+        echo "     ✅ mssql-jdbc-12.4.2.jre11.jar"
+    else
+        echo "     ❌ mssql-jdbc-12.4.2.jre11.jar MISSING"
+        diag_failed=$((diag_failed + 1))
+    fi
+
+    echo ""
+    if [[ $diag_failed -eq 0 ]]; then
+        echo "  ✅ All diagnostics passed"
+    else
+        echo "  ⚠️  $diag_failed diagnostic(s) failed — fix above before Phase 2b"
+        exit 1
+    fi
+fi
+
+echo ""
 if [[ $failed -eq 0 ]]; then
     echo "✅ All nodes deployed successfully"
 else

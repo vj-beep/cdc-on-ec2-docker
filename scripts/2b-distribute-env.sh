@@ -178,6 +178,73 @@ else
 fi
 
 echo ""
+
+# ============================================================
+# Post-Distribution Diagnostics
+# ============================================================
+if [[ ${#failed_nodes[@]} -eq 0 ]]; then
+    echo "[*] Phase 2b diagnostics..."
+    echo ""
+
+    diag_failed=0
+
+    # Check critical vars are set in .env on jumpbox
+    echo "  📋 .env on jumpbox:"
+    for var in HTTP_PROXY BROKER_1_INSTANCE_ID CONNECT_1_INSTANCE_ID MONITOR_1_INSTANCE_ID PUBLIC_REPO_URL; do
+        if grep -q "^${var}=" "$ENV_FILE"; then
+            echo "     ✅ $var set"
+        else
+            echo "     ❌ $var NOT set"
+            diag_failed=$((diag_failed + 1))
+        fi
+    done
+
+    # Sample check: verify on broker1
+    if [[ -n "${BROKER_1_INSTANCE_ID:-}" ]]; then
+        echo ""
+        echo "  📋 .env on broker1 (SSM sample check):"
+        cmd_id=$(aws ssm send-command \
+            --region "${AWS_REGION:-us-east-1}" \
+            --instance-ids "$BROKER_1_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["test -f /home/ec2-user/cdc-on-ec2-docker/.env && echo EXISTS || echo MISSING"],"executionTimeout":["10"]}' \
+            --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+
+        if [[ -n "$cmd_id" ]]; then
+            sleep 2
+            status=$(aws ssm get-command-invocation \
+                --region "${AWS_REGION:-us-east-1}" \
+                --command-id "$cmd_id" \
+                --instance-id "$BROKER_1_INSTANCE_ID" \
+                --query 'Status' --output text 2>/dev/null || echo "")
+
+            if [[ "$status" == "Success" ]]; then
+                output=$(aws ssm get-command-invocation \
+                    --region "${AWS_REGION:-us-east-1}" \
+                    --command-id "$cmd_id" \
+                    --instance-id "$BROKER_1_INSTANCE_ID" \
+                    --query 'StandardOutputContent' --output text 2>/dev/null || echo "")
+                if echo "$output" | grep -q "EXISTS"; then
+                    echo "     ✅ .env present on broker1"
+                else
+                    echo "     ❌ .env NOT found on broker1"
+                    diag_failed=$((diag_failed + 1))
+                fi
+            else
+                echo "     ⚠️  Cannot verify (SSM command $status)"
+            fi
+        fi
+    fi
+
+    echo ""
+    if [[ $diag_failed -eq 0 ]]; then
+        echo "  ✅ All diagnostics passed"
+    else
+        echo "  ⚠️  $diag_failed diagnostic(s) failed — check above before Phase 3"
+    fi
+fi
+
+echo ""
 if [[ ${#failed_nodes[@]} -eq 0 ]]; then
     success "All nodes have .env distributed"
     echo ""
