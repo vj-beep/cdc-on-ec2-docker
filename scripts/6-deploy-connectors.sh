@@ -235,6 +235,18 @@ else
 fi
 
 echo ""
+echo "[*] Phase 6 diagnostics..."
+echo "  Deployed connectors:"
+connectors=$(curl -s "http://${CONNECT_1_IP}:8083/connectors" 2>/dev/null | grep -o '"[^"]*"' | tr -d '"' | sort)
+if [[ -n "$connectors" ]]; then
+    echo "$connectors" | while read c; do
+        echo "    ✅ $c"
+    done
+else
+    echo "    ⚠️  No connectors found"
+fi
+
+echo ""
 echo "[OK] All 4 connectors deployed"
 echo ""
 echo "Verify connector status:"

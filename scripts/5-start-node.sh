@@ -172,6 +172,14 @@ case $NODE in
       up -d broker node-exporter cadvisor
     echo "✅ Broker-1 started"
     echo ""
+    echo "[*] Broker-1 diagnostics:"
+    running=$(docker ps --filter 'name=broker-1' -q)
+    if [[ -n "$running" ]]; then
+        echo "  ✅ Container running"
+    else
+        echo "  ❌ Container not running"
+    fi
+    echo ""
     echo "⏳ Wait 3-5 minutes for KRaft leader election"
     echo "   Check status: docker logs \$(docker ps --filter 'name=broker-1' -q) | grep -i leader"
     ;;
@@ -183,6 +191,14 @@ case $NODE in
       up -d broker node-exporter cadvisor
     echo "✅ Broker-2 started"
     echo ""
+    echo "[*] Broker-2 diagnostics:"
+    running=$(docker ps --filter 'name=broker-2' -q)
+    if [[ -n "$running" ]]; then
+        echo "  ✅ Container running"
+    else
+        echo "  ❌ Container not running"
+    fi
+    echo ""
     echo "⏳ Wait 3-5 minutes for KRaft leader election"
     echo "   Check status: docker logs \$(docker ps --filter 'name=broker-2' -q) | grep -i leader"
     ;;
@@ -193,6 +209,14 @@ case $NODE in
     docker compose -f docker-compose.yml -f docker-compose.broker3.yml \
       up -d broker node-exporter cadvisor
     echo "✅ Broker-3 started"
+    echo ""
+    echo "[*] Broker-3 diagnostics:"
+    running=$(docker ps --filter 'name=broker-3' -q)
+    if [[ -n "$running" ]]; then
+        echo "  ✅ Container running"
+    else
+        echo "  ❌ Container not running"
+    fi
     echo ""
     echo "⏳ Wait 3-5 minutes for KRaft leader election"
     echo "   Check status: docker logs \$(docker ps --filter 'name=broker-3' -q) | grep -i leader"
@@ -213,6 +237,14 @@ case $NODE in
     docker compose -f docker-compose.yml -f docker-compose.connect-schema-registry.yml \
       up -d connect-1 connect-2 schema-registry node-exporter cadvisor
     echo "✅ Connect + Schema Registry started"
+    echo ""
+    echo "[*] Connect diagnostics:"
+    running=$(docker ps --filter 'name=connect' -q | head -1)
+    if [[ -n "$running" ]]; then
+        echo "  ✅ Connect container running"
+    else
+        echo "  ❌ Connect container not running"
+    fi
     echo ""
     echo "⏳ Wait 1-2 minutes for services to initialize"
     echo "   Check status: curl http://localhost:8083/connectors"
@@ -272,6 +304,16 @@ case $NODE in
       up -d control-center ksqldb-server rest-proxy flink-jobmanager flink-taskmanager \
       prometheus grafana alertmanager node-exporter cadvisor
     echo "✅ Monitoring stack started"
+    echo ""
+    echo "[*] Monitor diagnostics:"
+    for svc in grafana prometheus control-center ksqldb; do
+        running=$(docker ps --filter "name=$svc" -q | head -1)
+        if [[ -n "$running" ]]; then
+            echo "  ✅ $svc container running"
+        else
+            echo "  ⚠️  $svc container status unclear"
+        fi
+    done
     echo ""
     echo "Access points:"
     echo "  • Grafana: http://localhost:3000"
