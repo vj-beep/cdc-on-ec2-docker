@@ -39,6 +39,7 @@ SQLCMDPASSWORD="$SQLSERVER_PASSWORD" sqlcmd \
     -U "$SQLSERVER_USER" \
     -d "$SQLSERVER_DATABASE" \
     -C \
+    -w 240 \
     << 'EOF'
 
 -- Tables and columns in the SMT schema cache
@@ -46,14 +47,13 @@ SET NOCOUNT ON;
 
 DECLARE @SCHEMA NVARCHAR(128) = 'dbo';
 
--- Column name mapping (what SMT sees: lowercase columns)
+-- Column name mapping (what SMT sees: exact case from SQL Server)
 SELECT
-  t.TABLE_SCHEMA,
   t.TABLE_NAME,
   c.COLUMN_NAME,
   c.DATA_TYPE,
-  c.IS_NULLABLE,
-  CASE WHEN tc.CONSTRAINT_TYPE = 'PRIMARY KEY' THEN 'PK' ELSE '' END AS PK
+  CASE WHEN c.IS_NULLABLE = 'YES' THEN 'YES' ELSE 'NO' END AS NULLABLE,
+  CASE WHEN tc.CONSTRAINT_TYPE = 'PRIMARY KEY' THEN '[PK]' ELSE '' END AS [PK]
 FROM INFORMATION_SCHEMA.TABLES t
 LEFT JOIN INFORMATION_SCHEMA.COLUMNS c
   ON t.TABLE_SCHEMA = c.TABLE_SCHEMA
@@ -75,9 +75,12 @@ EOF
 echo ""
 echo "=========================================================="
 echo "SMT Behavior:"
-echo "  - Caches all tables in schema '$SMT_TABLE_SCHEMA' at startup"
-echo "  - For each table, records all column names (exact case)"
-echo "  - When processing records, transforms Kafka field names"
-echo "    from lowercase to SQL Server exact case"
-echo "  - Example: 'title' (Kafka) → 'title' (SQL Server)"
+echo "  • Loads all tables in schema '$SMT_TABLE_SCHEMA' at startup"
+echo "  • Caches exact column names (preserves SQL Server case)"
+echo "  • Maps Kafka field names to SQL Server exact case"
+echo ""
+echo "Example transformation:"
+echo "  Kafka record:    {title: 'Task', dataXml: '...'}"
+echo "  SMT maps to:     title → title, dataXml → dataXml"
+echo "  SQL Server:      INSERT INTO workItemData (title, dataXml)"
 echo "=========================================================="
