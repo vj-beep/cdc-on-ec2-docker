@@ -146,26 +146,36 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
         fi
     done
 
-    # Verify pre-built JARs exist
-    if [[ ! -f "connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar" ]]; then
-        echo "   ❌ Missing JAR: connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar"
-        tar_errors=$((tar_errors + 1))
-    else
-        echo "   ✅ connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar"
-    fi
+    echo ""
+    echo "[PRE-BUILT JAR FILES]"
+    # Custom SMTs and SQL Server JDBC driver
+    jar_files=(
+        "connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar"
+        "connect/jars/strip-null-bytes-smt.jar"
+        "connect/jars/mssql-jdbc-12.4.2.jre11.jar"
+    )
 
-    if [[ ! -f "connect/jars/strip-null-bytes-smt.jar" ]]; then
-        echo "   ❌ Missing JAR: connect/jars/strip-null-bytes-smt.jar"
-        tar_errors=$((tar_errors + 1))
-    else
-        echo "   ✅ connect/jars/strip-null-bytes-smt.jar"
-    fi
+    jar_errors=0
+    for jar_file in "${jar_files[@]}"; do
+        if [[ ! -f "$jar_file" ]]; then
+            echo "   ❌ Missing: $jar_file"
+            jar_errors=$((jar_errors + 1))
+        else
+            size=$(stat -f%z "$jar_file" 2>/dev/null || stat -c%s "$jar_file" 2>/dev/null)
+            size_kb=$((size / 1024))
+            if [[ $size_kb -lt 10 ]]; then
+                size_display="${size} B"
+            else
+                size_display="${size_kb} KB"
+            fi
+            echo "   ✅ $jar_file ($size_display)"
+        fi
+    done
 
-    if [[ ! -f "connect/jars/mssql-jdbc-12.4.2.jre11.jar" ]]; then
-        echo "   ❌ Missing JAR: connect/jars/mssql-jdbc-12.4.2.jre11.jar"
-        tar_errors=$((tar_errors + 1))
-    else
-        echo "   ✅ connect/jars/mssql-jdbc-12.4.2.jre11.jar"
+    if [[ $jar_errors -gt 0 ]]; then
+        echo ""
+        echo "[ERROR] Missing JAR file(s) ($jar_errors)"
+        tar_errors=$((tar_errors + jar_errors))
     fi
 
     if [[ $tar_errors -gt 0 ]]; then
@@ -173,6 +183,13 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
         echo "[ERROR] Pre-flight validation failed ($tar_errors issue(s))"
         exit 1
     fi
+
+    echo ""
+    echo "[BUILD SUMMARY]"
+    echo "   Debezium Connectors: 3 tarballs (SQL Server, Postgres, JDBC)"
+    echo "   Custom SMTs: 2 pre-built JARs (SqlServerCaseRestorer, StripNullBytes)"
+    echo "   JDBC Driver: mssql-jdbc-12.4.2.jre11.jar (MS SQL Server)"
+    echo ""
 
     echo "[*] Step 2: Build Docker image..."
     echo "[*] Building image (pre-built JARs — typically 1-2 minutes)..."
@@ -185,7 +202,19 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
     if [[ $build_status -eq 0 ]]; then
         echo ""
         echo "[OK] Connect image built successfully"
-        docker images | grep cdc-connect
+        echo ""
+        echo "[IMAGE DETAILS]"
+        docker images | grep cdc-connect | awk '{printf "   Image: %s:%s (%s MB)\n", $1, $2, int($4)}'
+        echo ""
+        echo "[COMPONENTS INCLUDED]"
+        echo "   ✅ Debezium 3.2.6.Final connectors:"
+        echo "      - SQL Server source"
+        echo "      - PostgreSQL source"
+        echo "      - JDBC sink"
+        echo "   ✅ Custom SMTs (pre-built JARs):"
+        echo "      - SqlServerCaseRestorer (17 KB)"
+        echo "      - StripNullBytes (2.2 KB)"
+        echo "   ✅ JDBC Driver: mssql-jdbc-12.4.2.jre11 (1.4 MB)"
         echo ""
         echo "Next: ./scripts/5-start-node.sh --local connect"
         exit 0
