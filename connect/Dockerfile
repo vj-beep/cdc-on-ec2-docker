@@ -45,7 +45,11 @@ COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-component
 
 # SqlServerCaseRestorer SMT — pre-built JAR committed alongside mssql-jdbc.
 # No Maven build step required; works in proxy/air-gapped environments.
+# Copy to both jdbc sink connector dir and main confluent lib for classpath discovery.
 COPY connect/jars/kafka-connect-sqlserver-case-restorer-*.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
+COPY connect/jars/kafka-connect-sqlserver-case-restorer-*.jar /usr/share/java/
 
 # StripNullBytes SMT — pre-built JAR for stripping chr(0) null bytes from records.
+# Copy to both jdbc sink connector dir and main confluent lib for classpath discovery.
 COPY connect/jars/strip-null-bytes-smt.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
+COPY connect/jars/strip-null-bytes-smt.jar /usr/share/java/
