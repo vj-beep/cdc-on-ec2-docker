@@ -154,6 +154,20 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
         echo "   ✅ connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar"
     fi
 
+    if [[ ! -f "connect/jars/strip-null-bytes-smt.jar" ]]; then
+        echo "   ❌ Missing JAR: connect/jars/strip-null-bytes-smt.jar"
+        tar_errors=$((tar_errors + 1))
+    else
+        echo "   ✅ connect/jars/strip-null-bytes-smt.jar"
+    fi
+
+    if [[ ! -f "connect/jars/mssql-jdbc-12.4.2.jre11.jar" ]]; then
+        echo "   ❌ Missing JAR: connect/jars/mssql-jdbc-12.4.2.jre11.jar"
+        tar_errors=$((tar_errors + 1))
+    else
+        echo "   ✅ connect/jars/mssql-jdbc-12.4.2.jre11.jar"
+    fi
+
     if [[ $tar_errors -gt 0 ]]; then
         echo ""
         echo "[ERROR] Pre-flight validation failed ($tar_errors issue(s))"
