@@ -237,17 +237,32 @@ fi
 echo ""
 echo "[*] Phase 6 diagnostics..."
 echo "  Deployed connectors:"
-connectors=$(curl -s "http://${CONNECT_1_IP}:8083/connectors" 2>/dev/null | grep -o '"[^"]*"' | tr -d '"' | sort)
-if [[ -n "$connectors" ]]; then
-    echo "$connectors" | while read c; do
-        echo "    ✅ $c"
+
+# Forward path connectors (port 8083)
+echo "    Forward path (8083):"
+connectors_fwd=$(curl -s "http://${CONNECT_1_IP}:8083/connectors" 2>/dev/null | grep -o '"[^"]*"' | tr -d '"' | sort)
+if [[ -n "$connectors_fwd" ]]; then
+    echo "$connectors_fwd" | while read c; do
+        echo "      ✅ $c"
     done
 else
-    echo "    ⚠️  No connectors found"
+    echo "      ⚠️  No connectors found"
+fi
+
+# Reverse path connectors (port 8084)
+echo "    Reverse path (8084):"
+connectors_rev=$(curl -s "http://${CONNECT_1_IP}:8084/connectors" 2>/dev/null | grep -o '"[^"]*"' | tr -d '"' | sort)
+if [[ -n "$connectors_rev" ]]; then
+    echo "$connectors_rev" | while read c; do
+        echo "      ✅ $c"
+    done
+else
+    echo "      ⚠️  No connectors found"
 fi
 
 echo ""
-echo "[OK] All 4 connectors deployed"
+total_connectors=$(($(echo "$connectors_fwd" | wc -l) + $(echo "$connectors_rev" | wc -l)))
+echo "[OK] All $total_connectors connectors deployed"
 echo ""
 echo "Verify connector status:"
 echo "  Forward: curl http://${CONNECT_1_IP}:8083/connectors?expand=status"
