@@ -194,9 +194,9 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
     echo "[*] Step 2: Build Docker image..."
     echo "[*] Building image (pre-built JARs — typically 1-2 minutes)..."
 
-    # Capture full build output for diagnostics
+    # Capture full build output for diagnostics (silent, no interactive tee)
     build_log="/tmp/docker-build-$(date +%s).log"
-    DOCKER_BUILDKIT=0 docker compose --env-file .env -f docker-compose.connect-build.yml build > >(tee "$build_log") 2>&1
+    DOCKER_BUILDKIT=0 docker compose --env-file .env -f docker-compose.connect-build.yml build > "$build_log" 2>&1
     build_status=$?
 
     if [[ $build_status -eq 0 ]]; then
