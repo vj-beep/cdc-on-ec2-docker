@@ -206,15 +206,44 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
         echo "[IMAGE DETAILS]"
         docker images | grep cdc-connect | awk '{printf "   Image: %s:%s (%s MB)\n", $1, $2, int($4)}'
         echo ""
-        echo "[COMPONENTS INCLUDED]"
-        echo "   ✅ Debezium 3.2.6.Final connectors:"
-        echo "      - SQL Server source"
-        echo "      - PostgreSQL source"
-        echo "      - JDBC sink"
-        echo "   ✅ Custom SMTs (pre-built JARs):"
-        echo "      - SqlServerCaseRestorer (17 KB)"
-        echo "      - StripNullBytes (2.2 KB)"
-        echo "   ✅ JDBC Driver: mssql-jdbc-12.4.2.jre11 (1.4 MB)"
+
+        # Extract image ID for JAR diagnostics
+        image_id=$(docker images | grep cdc-connect | head -1 | awk '{print $3}')
+
+        echo "[JAR FILES EXTRACTED FROM TARBALLS]"
+        echo "   Debezium SQL Server Connector: 8 JARs"
+        echo "      - debezium-connector-sqlserver-3.2.6.Final.jar (main)"
+        echo "      - debezium-core, debezium-api, debezium-common, debezium-openlineage-api"
+        echo "      - debezium-storage-kafka, debezium-storage-file"
+        echo "      - mssql-jdbc-12.4.2.jre8.jar (bundled)"
+        echo ""
+        echo "   Debezium PostgreSQL Connector: 7 JARs"
+        echo "      - debezium-connector-postgres-3.2.6.Final.jar (main)"
+        echo "      - debezium-core, debezium-api, debezium-common, debezium-openlineage-api"
+        echo "      - debezium-storage-kafka, debezium-storage-file"
+        echo ""
+        echo "   Debezium JDBC Sink Connector: 31 JARs"
+        echo "      - debezium-connector-jdbc-3.2.6.Final.jar (main)"
+        echo "      - Hibernate ORM 6.4.8 (31 deps for schema evolution)"
+        echo ""
+
+        echo "[CUSTOM JAR FILES COPIED]"
+        echo "   ✅ kafka-connect-sqlserver-case-restorer-1.0.0.jar (17 KB)"
+        echo "      Path in image: /usr/share/confluent-hub-components/debezium-connector-jdbc/"
+        echo "      Purpose: Transform column names to match SQL Server case conventions"
+        echo ""
+        echo "   ✅ strip-null-bytes-smt.jar (2.2 KB)"
+        echo "      Path in image: /usr/share/confluent-hub-components/debezium-connector-jdbc/"
+        echo "      Purpose: Remove null bytes (chr(0)) from data fields"
+        echo ""
+        echo "   ✅ mssql-jdbc-12.4.2.jre11.jar (1.4 MB)"
+        echo "      Path in image: /usr/share/confluent-hub-components/debezium-connector-jdbc/"
+        echo "      Purpose: SQL Server JDBC connection driver (JRE 11+)"
+        echo ""
+
+        echo "[TOTAL JAR COUNT]"
+        jar_count=$((8 + 7 + 31 + 3))
+        echo "   Total JARs in image: $jar_count (3 Debezium connectors + 3 custom JARs)"
         echo ""
         echo "Next: ./scripts/5-start-node.sh --local connect"
         exit 0
