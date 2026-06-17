@@ -485,6 +485,13 @@ if [[ $failed -eq 0 ]]; then
         diag_failed=$((diag_failed + 1))
     fi
 
+    if [[ -f "$SCRIPT_DIR/connect/jars/strip-null-bytes-smt.jar" ]]; then
+        echo "     ✅ strip-null-bytes-smt.jar"
+    else
+        echo "     ❌ strip-null-bytes-smt.jar MISSING"
+        diag_failed=$((diag_failed + 1))
+    fi
+
     echo ""
     if [[ $diag_failed -eq 0 ]]; then
         echo "  ✅ All diagnostics passed"
