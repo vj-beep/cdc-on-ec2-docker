@@ -172,16 +172,18 @@ case $NODE in
       up -d broker node-exporter cadvisor
     echo "✅ Broker-1 started"
     echo ""
+    # Wait for containers to start
+    sleep 5
     echo "[*] Broker-1 diagnostics:"
-    running=$(docker ps --filter 'name=broker-1' -q)
+    running=$(docker ps --filter 'name=broker' -q | head -1)
     if [[ -n "$running" ]]; then
-        echo "  ✅ Container running"
+        echo "  ✅ Container running (cdc-on-ec2-docker-broker-1)"
     else
-        echo "  ❌ Container not running"
+        echo "  ⚠️  Container still starting (may take 30-60 seconds)"
     fi
     echo ""
     echo "⏳ Wait 3-5 minutes for KRaft leader election"
-    echo "   Check status: docker logs \$(docker ps --filter 'name=broker-1' -q) | grep -i leader"
+    echo "   Check status: docker logs cdc-on-ec2-docker-broker-1 | grep -i leader"
     ;;
 
   broker2)
@@ -191,16 +193,18 @@ case $NODE in
       up -d broker node-exporter cadvisor
     echo "✅ Broker-2 started"
     echo ""
+    # Wait for containers to start
+    sleep 5
     echo "[*] Broker-2 diagnostics:"
-    running=$(docker ps --filter 'name=broker-2' -q)
+    running=$(docker ps --filter 'name=broker' -q | head -1)
     if [[ -n "$running" ]]; then
-        echo "  ✅ Container running"
+        echo "  ✅ Container running (cdc-on-ec2-docker-broker-1)"
     else
-        echo "  ❌ Container not running"
+        echo "  ⚠️  Container still starting (may take 30-60 seconds)"
     fi
     echo ""
     echo "⏳ Wait 3-5 minutes for KRaft leader election"
-    echo "   Check status: docker logs \$(docker ps --filter 'name=broker-2' -q) | grep -i leader"
+    echo "   Check status: docker logs cdc-on-ec2-docker-broker-1 | grep -i leader"
     ;;
 
   broker3)
@@ -210,16 +214,18 @@ case $NODE in
       up -d broker node-exporter cadvisor
     echo "✅ Broker-3 started"
     echo ""
+    # Wait for containers to start
+    sleep 5
     echo "[*] Broker-3 diagnostics:"
-    running=$(docker ps --filter 'name=broker-3' -q)
+    running=$(docker ps --filter 'name=broker' -q | head -1)
     if [[ -n "$running" ]]; then
-        echo "  ✅ Container running"
+        echo "  ✅ Container running (cdc-on-ec2-docker-broker-1)"
     else
-        echo "  ❌ Container not running"
+        echo "  ⚠️  Container still starting (may take 30-60 seconds)"
     fi
     echo ""
     echo "⏳ Wait 3-5 minutes for KRaft leader election"
-    echo "   Check status: docker logs \$(docker ps --filter 'name=broker-3' -q) | grep -i leader"
+    echo "   Check status: docker logs cdc-on-ec2-docker-broker-1 | grep -i leader"
     ;;
 
   connect)
