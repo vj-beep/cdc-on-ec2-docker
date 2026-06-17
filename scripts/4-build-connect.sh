@@ -398,13 +398,18 @@ else
     echo ""
 
     if [[ "$status" == "Success" ]]; then
-        echo "[OK] Connect image built successfully"
         echo ""
-        echo "Next: ./scripts/5-start-node.sh connect"
+        echo "=== Build Output from Node 4 ==="
+        aws ssm get-command-invocation \
+            --region "$AWS_REGION" \
+            --command-id "$cmd_id" \
+            --instance-id "$instance_id" \
+            --query 'StandardOutputContent' \
+            --output text 2>/dev/null
     else
         echo "[ERROR] Build failed. Status: $status"
         echo ""
-        echo "=== Output from Node 4 ==="
+        echo "=== Build Output from Node 4 (stdout) ==="
         aws ssm get-command-invocation \
             --region "$AWS_REGION" \
             --command-id "$cmd_id" \
@@ -420,31 +425,6 @@ else
             --query 'StandardErrorContent' \
             --output text 2>/dev/null
         exit 1
-    fi
-
-    # ============================================================
-    # Post-Build Diagnostics
-    # ============================================================
-    echo ""
-    echo "[*] Phase 4 diagnostics..."
-    cmd_id=$(aws ssm send-command \
-        --region "$AWS_REGION" \
-        --instance-ids "$instance_id" \
-        --document-name "AWS-RunShellScript" \
-        --parameters '{"commands":["docker images | grep cdc-connect | head -1"],"executionTimeout":["10"]}' \
-        --query 'Command.CommandId' --output text 2>/dev/null || echo "")
-
-    if [[ -n "$cmd_id" ]]; then
-        sleep 2
-        output=$(aws ssm get-command-invocation \
-            --region "$AWS_REGION" \
-            --command-id "$cmd_id" \
-            --instance-id "$instance_id" \
-            --query 'StandardOutputContent' --output text 2>/dev/null || echo "")
-        if [[ -n "$output" ]]; then
-            echo "  ✅ Connect image built:"
-            echo "     $output"
-        fi
     fi
 
     echo ""
