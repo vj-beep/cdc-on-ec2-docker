@@ -24,7 +24,9 @@
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "value.converter.schemas.enable": "true",
 
-    "transforms": "routeTopics,caseRestorer",
+    "transforms": "stripNullBytes,routeTopics,caseRestorer",
+
+    "transforms.stripNullBytes.type": "com.cdc.smt.StripNullBytes",
 
     "transforms.routeTopics.type": "org.apache.kafka.connect.transforms.RegexRouter",
     "transforms.routeTopics.regex": "${JDBC_SINK_SQLSERVER_TOPIC_REGEX}",
