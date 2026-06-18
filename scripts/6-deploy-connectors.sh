@@ -2,22 +2,49 @@
 # ============================================================
 # Phase 6: Deploy CDC Connectors
 # ============================================================
-# Deploys all 4 CDC connectors (forward + reverse paths)
+# Deploys CDC connectors for forward path, reverse path, or both.
 #
-# Connectors deployed:
-#   1. debezium-sqlserver-source  (SQL Server -> Kafka)
-#   2. jdbc-sink-aurora           (Kafka -> Aurora PG)
-#   3. debezium-postgres-source   (Aurora PG -> Kafka)
-#   4. jdbc-sink-sqlserver        (Kafka -> SQL Server)
+# Connectors:
+#   Forward path (SQL Server -> Aurora):
+#     1. debezium-sqlserver-source  (SQL Server -> Kafka)
+#     2. jdbc-sink-aurora           (Kafka -> Aurora PG)
 #
-# Prerequisites:
-#   - All services running (brokers, Connect, Schema Registry)
-#   - Phase 5 (start services) complete — all brokers and Connect workers running
+#   Reverse path (Aurora -> SQL Server):
+#     3. debezium-postgres-source   (Aurora PG -> Kafka)
+#     4. jdbc-sink-sqlserver        (Kafka -> SQL Server)
 #
-# Usage: ./scripts/6-deploy-connectors.sh
+# Usage:
+#   ./scripts/6-deploy-connectors.sh                  # Deploy all 4 connectors
+#   ./scripts/6-deploy-connectors.sh --forward-only   # Forward path only (SQL Server -> Aurora)
+#   ./scripts/6-deploy-connectors.sh --reverse-only   # Reverse path only (Aurora -> SQL Server)
+#
+# Recommended sequence for new deployments:
+#   1. Run --forward-only first — lets Aurora tables be auto-created by jdbc-sink-aurora
+#   2. DBA reviews Aurora schema, enables CDC on tables (ALTER PUBLICATION ... ADD TABLE ...)
+#   3. Run --reverse-only to activate the reverse path
 # ============================================================
 
 set -euo pipefail
+
+# --- Parse flags ---
+DEPLOY_FORWARD=true
+DEPLOY_REVERSE=true
+
+for arg in "$@"; do
+    case "$arg" in
+        --forward-only) DEPLOY_REVERSE=false ;;
+        --reverse-only) DEPLOY_FORWARD=false ;;
+        --help|-h)
+            sed -n '/^# ====/,/^# ====/p' "$0" | grep "^#" | sed 's/^# \?//'
+            exit 0
+            ;;
+        *)
+            echo "[ERROR] Unknown flag: $arg"
+            echo "Usage: $0 [--forward-only|--reverse-only]"
+            exit 1
+            ;;
+    esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
@@ -166,25 +193,41 @@ print(json.dumps(data))
     fi
 }
 
+if [[ "$DEPLOY_FORWARD" == "true" && "$DEPLOY_REVERSE" == "true" ]]; then
+    echo "[*] Mode: all connectors (forward + reverse)"
+elif [[ "$DEPLOY_FORWARD" == "true" ]]; then
+    echo "[*] Mode: forward path only (SQL Server -> Aurora)"
+else
+    echo "[*] Mode: reverse path only (Aurora -> SQL Server)"
+fi
+
 echo ""
-echo "Step 1/3: Deploying source connectors (both paths)..."
+echo "Step 1/3: Deploying source connectors..."
 echo ""
 
 # Sources first — they create CDC topics that sinks subscribe to via topics.regex
-deploy_connector "$CONNECTORS_DIR/debezium-sqlserver-source.json" "$CONNECT_FORWARD_URL" || exit 1
-deploy_connector "$CONNECTORS_DIR/debezium-postgres-source.json" "$CONNECT_REVERSE_URL" || exit 1
+if [[ "$DEPLOY_FORWARD" == "true" ]]; then
+    deploy_connector "$CONNECTORS_DIR/debezium-sqlserver-source.json" "$CONNECT_FORWARD_URL" || exit 1
+fi
+if [[ "$DEPLOY_REVERSE" == "true" ]]; then
+    deploy_connector "$CONNECTORS_DIR/debezium-postgres-source.json" "$CONNECT_REVERSE_URL" || exit 1
+fi
 
 echo ""
 echo "Step 2/3: Waiting 15s for source connectors to create CDC topics..."
 sleep 15
 
 echo ""
-echo "Step 3/3: Deploying sink connectors (both paths)..."
+echo "Step 3/3: Deploying sink connectors..."
 echo ""
 
 # Sinks after topics exist — topics.regex can match partitions during consumer group join
-deploy_connector "$CONNECTORS_DIR/jdbc-sink-aurora.json" "$CONNECT_FORWARD_URL" || exit 1
-deploy_connector "$CONNECTORS_DIR/jdbc-sink-sqlserver.json" "$CONNECT_REVERSE_URL" || exit 1
+if [[ "$DEPLOY_FORWARD" == "true" ]]; then
+    deploy_connector "$CONNECTORS_DIR/jdbc-sink-aurora.json" "$CONNECT_FORWARD_URL" || exit 1
+fi
+if [[ "$DEPLOY_REVERSE" == "true" ]]; then
+    deploy_connector "$CONNECTORS_DIR/jdbc-sink-sqlserver.json" "$CONNECT_REVERSE_URL" || exit 1
+fi
 
 # --- Post-deploy: verify sink partition assignments ---
 echo ""
@@ -224,8 +267,8 @@ print(len(running))
 }
 
 SINK_WARNINGS=0
-verify_sink_partitions "jdbc-sink-aurora" "$CONNECT_FORWARD_URL" || SINK_WARNINGS=$((SINK_WARNINGS + 1))
-verify_sink_partitions "jdbc-sink-sqlserver" "$CONNECT_REVERSE_URL" || SINK_WARNINGS=$((SINK_WARNINGS + 1))
+[[ "$DEPLOY_FORWARD" == "true" ]] && { verify_sink_partitions "jdbc-sink-aurora" "$CONNECT_FORWARD_URL" || SINK_WARNINGS=$((SINK_WARNINGS + 1)); }
+[[ "$DEPLOY_REVERSE" == "true" ]] && { verify_sink_partitions "jdbc-sink-sqlserver" "$CONNECT_REVERSE_URL" || SINK_WARNINGS=$((SINK_WARNINGS + 1)); }
 
 echo ""
 if [[ $SINK_WARNINGS -gt 0 ]]; then
