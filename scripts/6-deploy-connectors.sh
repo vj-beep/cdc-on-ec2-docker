@@ -14,9 +14,9 @@
 #     4. jdbc-sink-sqlserver        (Kafka -> SQL Server)
 #
 # Usage:
-#   ./scripts/6-deploy-connectors.sh                  # Deploy all 4 connectors
 #   ./scripts/6-deploy-connectors.sh --forward-only   # Forward path only (SQL Server -> Aurora)
 #   ./scripts/6-deploy-connectors.sh --reverse-only   # Reverse path only (Aurora -> SQL Server)
+#   ./scripts/6-deploy-connectors.sh --all            # Deploy all 4 connectors
 #
 # Recommended sequence for new deployments:
 #   1. Run --forward-only first — lets Aurora tables be auto-created by jdbc-sink-aurora
@@ -27,20 +27,31 @@
 set -euo pipefail
 
 # --- Parse flags ---
-DEPLOY_FORWARD=true
-DEPLOY_REVERSE=true
+DEPLOY_FORWARD=false
+DEPLOY_REVERSE=false
+
+if [[ $# -eq 0 ]]; then
+    echo "[ERROR] A deployment path is required."
+    echo ""
+    echo "Usage:"
+    echo "  $0 --forward-only   # SQL Server -> Aurora (run first for new deployments)"
+    echo "  $0 --reverse-only   # Aurora -> SQL Server (run after Aurora tables are ready)"
+    echo "  $0 --all            # Deploy all 4 connectors"
+    exit 1
+fi
 
 for arg in "$@"; do
     case "$arg" in
-        --forward-only) DEPLOY_REVERSE=false ;;
-        --reverse-only) DEPLOY_FORWARD=false ;;
+        --forward-only) DEPLOY_FORWARD=true ;;
+        --reverse-only) DEPLOY_REVERSE=true ;;
+        --all) DEPLOY_FORWARD=true; DEPLOY_REVERSE=true ;;
         --help|-h)
             sed -n '/^# ====/,/^# ====/p' "$0" | grep "^#" | sed 's/^# \?//'
             exit 0
             ;;
         *)
             echo "[ERROR] Unknown flag: $arg"
-            echo "Usage: $0 [--forward-only|--reverse-only]"
+            echo "Usage: $0 [--forward-only|--reverse-only|--all]"
             exit 1
             ;;
     esac
@@ -197,7 +208,7 @@ if [[ "$DEPLOY_FORWARD" == "true" && "$DEPLOY_REVERSE" == "true" ]]; then
     echo "[*] Mode: all connectors (forward + reverse)"
 elif [[ "$DEPLOY_FORWARD" == "true" ]]; then
     echo "[*] Mode: forward path only (SQL Server -> Aurora)"
-else
+elif [[ "$DEPLOY_REVERSE" == "true" ]]; then
     echo "[*] Mode: reverse path only (Aurora -> SQL Server)"
 fi
 
