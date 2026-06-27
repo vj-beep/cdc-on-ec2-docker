@@ -39,9 +39,10 @@ ENV JAVA_TOOL_OPTIONS= \
     https_proxy= \
     no_proxy=
 
-# Copy the Microsoft SQL Server JDBC driver into the Confluent JDBC connector plugin directory.
-# Not bundled with the connector; must be present for jdbc:sqlserver:// URLs to resolve.
+# Copy JDBC drivers into the Confluent JDBC connector plugin directory.
+# Neither driver is bundled with the connector — both must be present for the dialect classes to load.
 COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-components/confluentinc-kafka-connect-jdbc/
+COPY connect/jars/postgresql-42.7.3.jar /usr/share/confluent-hub-components/confluentinc-kafka-connect-jdbc/
 
 # SqlServerCaseRestorer SMT — pre-built JAR committed alongside mssql-jdbc.
 # No Maven build step required; works in proxy/air-gapped environments.

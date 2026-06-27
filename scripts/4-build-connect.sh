@@ -118,11 +118,12 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
 
     echo ""
     echo "[PRE-BUILT JAR FILES]"
-    # Custom SMTs and SQL Server JDBC driver
+    # Custom SMTs and JDBC drivers (neither PostgreSQL nor SQL Server driver is bundled with Confluent JDBC sink)
     jar_files=(
         "connect/jars/kafka-connect-sqlserver-case-restorer-1.0.0.jar"
         "connect/jars/strip-null-bytes-smt.jar"
         "connect/jars/mssql-jdbc-12.4.2.jre11.jar"
+        "connect/jars/postgresql-42.7.3.jar"
     )
 
     jar_errors=0
@@ -184,7 +185,7 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
         echo "[CUSTOM JAR FILES COPIED]"
         jdbc_plugin_dir="/usr/share/confluent-hub-components/confluentinc-kafka-connect-jdbc"
         shared_java_dir="/usr/share/java"
-        for jar in mssql-jdbc-12.4.2.jre11.jar; do
+        for jar in mssql-jdbc-12.4.2.jre11.jar postgresql-42.7.3.jar; do
             size=$(docker run --rm --entrypoint stat "$image_id" -c%s "${jdbc_plugin_dir}/${jar}" 2>/dev/null || echo "0")
             if [[ "$size" -gt 0 ]]; then
                 echo "   ✅ $jar ($(( size / 1024 )) KB) in $jdbc_plugin_dir"
