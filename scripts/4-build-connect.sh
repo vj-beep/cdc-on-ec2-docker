@@ -163,7 +163,7 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
     echo ""
 
     echo "[*] Step 2: Build Docker image..."
-    echo "[*] Building image (pre-built JARs — typically 1-2 minutes)..."
+    echo "[*] Building image (confluent-hub install x3 — typically 5-10 minutes, network speed dependent)..."
 
     # Capture full build output for diagnostics (silent, no interactive tee)
     build_log="/tmp/docker-build-$(date +%s).log"
@@ -255,7 +255,7 @@ if [[ -z "$CONNECT_1_IP" ]]; then
 fi
 
 echo "[*] Phase 4: Building custom Connect image on Node 4 ($CONNECT_1_IP) [${DISPATCH_MODE^^}]..."
-echo "[*] Building image (pre-built JARs — typically 1-2 minutes)..."
+echo "[*] Building image (confluent-hub install x3 — typically 5-10 minutes, network speed dependent)..."
 
 if [[ "$DISPATCH_MODE" == "ssh" ]]; then
     # --- SSH dispatch ---
