@@ -37,8 +37,6 @@ connect/smt/.project
 # Docker build artifacts — too large for git
 docker-images/
 *.tar.gz
-!connect/debezium-libs/
-!connect/debezium-libs/*.tar.gz
 
 # Docker build logs
 /tmp/docker-build.log

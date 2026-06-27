@@ -108,43 +108,13 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
     # Run proxy diagnostics first
     diagnose_proxy || echo "[WARNING] Proxy diagnostics indicated issues"
 
-    echo "[TAR FILE VALIDATION]"
-    # Validate Debezium tar files
-    tar_files=(
-        "connect/debezium-libs/debezium-connector-sqlserver-3.2.6.Final-plugin.tar.gz"
-        "connect/debezium-libs/debezium-connector-postgres-3.2.6.Final-plugin.tar.gz"
-        "connect/debezium-libs/debezium-connector-jdbc-3.2.6.Final-plugin.tar.gz"
-    )
-
+    echo "[CONFLUENT HUB CONNECTORS]"
+    # Connectors are installed from Confluent Hub at image build time (confluent-hub install).
+    # No pre-downloaded tarballs required — confluent-hub runs inside the Docker build.
+    echo "   ✅ debezium/debezium-connector-sqlserver (installed at build time)"
+    echo "   ✅ debezium/debezium-connector-postgresql (installed at build time)"
+    echo "   ✅ confluentinc/kafka-connect-jdbc (installed at build time)"
     tar_errors=0
-    tar_expected_sizes=(2900000 4600000 29400000)  # Approximate expected sizes
-    for idx in "${!tar_files[@]}"; do
-        tar_file="${tar_files[$idx]}"
-        if [[ ! -f "$tar_file" ]]; then
-            echo "   ❌ Missing: $tar_file"
-            tar_errors=$((tar_errors + 1))
-        else
-            size=$(stat -f%z "$tar_file" 2>/dev/null || stat -c%s "$tar_file" 2>/dev/null)
-            size_mb=$((size / 1024 / 1024))
-            expected_mb=$((tar_expected_sizes[$idx] / 1024 / 1024))
-
-            # Verify file is gzip format
-            if file "$tar_file" | grep -q "gzip compressed"; then
-                # Check size is reasonable (within 10% of expected)
-                if [[ $size -lt $((tar_expected_sizes[$idx] * 90 / 100)) ]]; then
-                    echo "   ⚠️  $tar_file ($size_mb MB, UNDERSIZED - expected ~${expected_mb}M)"
-                    echo "       Likely cause: Incomplete download (network/proxy issue)"
-                    tar_errors=$((tar_errors + 1))
-                else
-                    echo "   ✅ $tar_file ($size_mb MB, valid gzip)"
-                fi
-            else
-                echo "   ❌ $tar_file ($size_mb MB, INVALID FORMAT — not gzip)"
-                echo "       Likely cause: Corrupted download or transferred as binary"
-                tar_errors=$((tar_errors + 1))
-            fi
-        fi
-    done
 
     echo ""
     echo "[PRE-BUILT JAR FILES]"
@@ -186,7 +156,8 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
 
     echo ""
     echo "[BUILD SUMMARY]"
-    echo "   Debezium Connectors: 3 tarballs (SQL Server, Postgres, JDBC)"
+    echo "   Source Connectors: debezium/debezium-connector-sqlserver + postgresql (Confluent Hub)"
+    echo "   Sink Connector:    confluentinc/kafka-connect-jdbc (Confluent Hub)"
     echo "   Custom SMTs: 2 pre-built JARs (SqlServerCaseRestorer, StripNullBytes)"
     echo "   JDBC Driver: mssql-jdbc-12.4.2.jre11.jar (MS SQL Server)"
     echo ""
@@ -211,11 +182,20 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
         image_id=$(docker images | grep cdc-connect | head -1 | awk '{print $3}')
 
         echo "[CUSTOM JAR FILES COPIED]"
-        plugin_dir="/usr/share/confluent-hub-components/debezium-connector-jdbc"
-        for jar in kafka-connect-sqlserver-case-restorer-1.0.0.jar strip-null-bytes-smt.jar mssql-jdbc-12.4.2.jre11.jar; do
-            size=$(docker run --rm --entrypoint stat "$image_id" -c%s "${plugin_dir}/${jar}" 2>/dev/null || echo "0")
+        jdbc_plugin_dir="/usr/share/confluent-hub-components/confluentinc-kafka-connect-jdbc"
+        shared_java_dir="/usr/share/java"
+        for jar in mssql-jdbc-12.4.2.jre11.jar; do
+            size=$(docker run --rm --entrypoint stat "$image_id" -c%s "${jdbc_plugin_dir}/${jar}" 2>/dev/null || echo "0")
             if [[ "$size" -gt 0 ]]; then
-                echo "   ✅ $jar ($(( size / 1024 )) KB)"
+                echo "   ✅ $jar ($(( size / 1024 )) KB) in $jdbc_plugin_dir"
+            else
+                echo "   ❌ $jar MISSING from image"
+            fi
+        done
+        for jar in kafka-connect-sqlserver-case-restorer-1.0.0.jar strip-null-bytes-smt.jar; do
+            size=$(docker run --rm --entrypoint stat "$image_id" -c%s "${shared_java_dir}/${jar}" 2>/dev/null || echo "0")
+            if [[ "$size" -gt 0 ]]; then
+                echo "   ✅ $jar ($(( size / 1024 )) KB) in $shared_java_dir"
             else
                 echo "   ❌ $jar MISSING from image"
             fi
@@ -232,43 +212,30 @@ if [[ "${1:-}" == "--local" || "${CDC_ON_NODE:-}" == "1" ]]; then
         echo "=== Full log saved to: $build_log ==="
         echo ""
         echo "[DIAGNOSTICS]"
-        echo "1. Tar file integrity:"
-        for tar_file in "${tar_files[@]}"; do
-            if [[ -f "$tar_file" ]]; then
-                tar tzf "$tar_file" > /dev/null 2>&1 && echo "   ✅ $tar_file is valid" || echo "   ❌ $tar_file is CORRUPTED"
-            fi
-        done
-
-        echo ""
-        echo "2. Proxy configuration:"
+        echo "1. Proxy configuration:"
         echo "   HTTP_PROXY=${HTTP_PROXY:-<not set>}"
         echo "   HTTPS_PROXY=${HTTPS_PROXY:-<not set>}"
         echo "   NO_PROXY=${NO_PROXY:-<not set>}"
 
         echo ""
         echo "[ROOT CAUSE ANALYSIS]"
-        if grep -q "gzip: stdin: not in gzip format" "$build_log"; then
-            echo "❌ Gzip decompression failed"
-            echo "   Causes:"
-            echo "   - Tar file corrupted during download (network/proxy issue)"
-            echo "   - File transferred as text instead of binary"
-            echo "   - Proxy modified content in transit"
-            echo ""
+        if grep -q "confluent-hub" "$build_log"; then
+            if grep -q "Failed to install" "$build_log" || grep -q "Could not connect" "$build_log"; then
+                echo "❌ confluent-hub install failed — likely a network/proxy issue during Docker build"
+                echo "   Confluent Hub requires outbound HTTPS to confluent-hub.com"
+                echo "   Ensure HTTP_PROXY/HTTPS_PROXY in .env allow that destination"
+            fi
         fi
 
+        echo ""
         echo "[REMEDIATION STEPS]"
-        echo "1. Re-run 2a-deploy-repo.sh to re-clone all files fresh:"
-        echo "   ./scripts/2a-deploy-repo.sh"
+        echo "1. Verify proxy allows outbound HTTPS from Node 4 to confluent-hub.com:"
+        echo "   curl -v --proxy \$HTTP_PROXY https://confluent-hub.com"
         echo ""
-        echo "2. Verify proxy is working from Node 4:"
-        echo "   curl -v --proxy \$HTTP_PROXY http://httpbin.org/get"
+        echo "2. If proxy blocks Confluent Hub, pass proxy build args explicitly:"
+        echo "   docker build --build-arg HTTP_PROXY=\$HTTP_PROXY --build-arg HTTPS_PROXY=\$HTTPS_PROXY ..."
         echo ""
-        echo "3. If proxy fails, check:"
-        echo "   - Proxy host/port in .env (should be: $HTTP_PROXY)"
-        echo "   - Network connectivity to proxy from Node 4"
-        echo "   - Proxy firewall rules (may be blocking certain destinations)"
-        echo ""
-        echo "4. After fixing, re-run:"
+        echo "3. After fixing, re-run:"
         echo "   ./scripts/4-build-connect.sh"
         exit 1
     fi

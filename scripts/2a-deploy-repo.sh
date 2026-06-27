@@ -168,33 +168,8 @@ if [[ "${1:-}" == "--local" ]]; then
 
         chown -R "${deploy_user}:${deploy_user}" "$deploy_dir"
 
-        # Validate tarballs — proxy truncation produces a truncated file that passes
-        # COPY but explodes in tar during docker build. Catch it here while we can retry.
-        echo "[*] Validating tarballs..."
-        tarball_ok=true
-        for f in "$deploy_dir"/connect/debezium-libs/debezium-connector-*.tar.gz; do
-            sz=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null || echo 0)
-            if tar -tzf "$f" > /dev/null 2>&1; then
-                echo "   ✅ $(basename "$f") ($((sz / 1024 / 1024))M)"
-            else
-                echo "   ❌ $(basename "$f") ($((sz / 1024 / 1024))M) — corrupt, proxy likely truncated during clone"
-                tarball_ok=false
-            fi
-        done
-
-        if $tarball_ok; then
-            break
-        fi
-
-        if [[ $attempt -ge $MAX_RETRIES ]]; then
-            echo ""
-            echo "[ERROR] Tarballs still corrupt after $MAX_RETRIES attempts"
-            echo "   Root cause: proxy is truncating large binaries during git clone"
-            echo "   Fix options:"
-            echo "   1. Switch to SSH clone: set PUBLIC_REPO_URL=git@github.com:... in .env"
-            echo "   2. Increase proxy timeout/buffer limits (proxy admin task)"
-            exit 1
-        fi
+        # Connectors are installed from Confluent Hub at image build time — no tarballs to validate.
+        break
     done
 
     # Restore most recent .env backup
@@ -293,11 +268,8 @@ REMOTE_EOF
 
         local clone_cmd="git clone ${ref_flag:+$ref_flag }${repo_url} ${DEPLOY_DIR} 2>&1 || { echo '[ERROR] Git clone failed'; exit 1; }"
 
-        # Tarball validation command (connect node only — empty string for others)
-        local validate_cmd="echo '[*] Skipping tarball validation (not connect node)'"
-        if [[ "$validate_tarballs" == "true" ]]; then
-            validate_cmd="echo '[*] Validating tarballs...' && ok=true && for f in ${DEPLOY_DIR}/connect/debezium-libs/debezium-connector-*.tar.gz; do sz=\$(stat -c%s \"\$f\" 2>/dev/null || echo 0); if tar -tzf \"\$f\" > /dev/null 2>&1; then echo \"   OK \$(basename \$f) (\$((sz/1024/1024))M)\"; else echo \"   CORRUPT \$(basename \$f) (\$((sz/1024/1024))M) — proxy truncated during clone\"; ok=false; fi; done && \$ok || { echo '[ERROR] Tarball validation failed — re-run 2a-deploy-repo.sh to retry'; exit 1; }"
-        fi
+        # Connectors are installed from Confluent Hub at image build time — no tarball validation needed.
+        local validate_cmd="echo '[*] Connectors installed from Confluent Hub at build time — no tarballs to validate'"
 
         cmd_json=$(jq -n \
             --arg proxy "$proxy_cmd" \
@@ -450,23 +422,12 @@ if [[ $failed -eq 0 ]]; then
         fi
     done
 
-    # Check tarball integrity
+    # Connectors are installed from Confluent Hub at image build time — no tarballs in repo.
     echo ""
-    echo "  📦 Debezium tarballs:"
-    for f in "$SCRIPT_DIR"/connect/debezium-libs/debezium-connector-*.tar.gz; do
-        if [[ -f "$f" ]]; then
-            if tar -tzf "$f" > /dev/null 2>&1; then
-                sz=$(($(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null) / 1024 / 1024))
-                echo "     ✅ $(basename $f) ($sz MB, valid gzip)"
-            else
-                echo "     ❌ $(basename $f) CORRUPTED (invalid gzip)"
-                diag_failed=$((diag_failed + 1))
-            fi
-        else
-            echo "     ❌ $(basename $f) MISSING"
-            diag_failed=$((diag_failed + 1))
-        fi
-    done
+    echo "  📦 Connector install method: Confluent Hub (at docker build time via confluent-hub install)"
+    echo "     ✅ debezium/debezium-connector-sqlserver"
+    echo "     ✅ debezium/debezium-connector-postgresql"
+    echo "     ✅ confluentinc/kafka-connect-jdbc"
 
     # Check case restorer JAR
     echo ""

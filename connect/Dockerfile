@@ -3,7 +3,10 @@ FROM confluentinc/cp-server-connect:${CP_VERSION}
 
 # Debezium 3.x required for CP 8.0.0 (kafka-clients 4.0 removed KafkaConsumer.poll(long)
 # which Debezium 2.x relied on — causes NoSuchMethodError at runtime).
-ARG DEBEZIUM_VERSION=3.2.6.Final
+# Confluent Hub version strings drop the .Final suffix used in Maven Central artifacts.
+ARG DEBEZIUM_VERSION=3.2.6
+# Confluent JDBC sink replaces the community Debezium JDBC sink for enterprise support coverage.
+ARG CONFLUENT_JDBC_VERSION=10.8.0
 
 # Java proxy (JAVA_TOOL_OPTIONS is the JVMTI-spec JVM mechanism).
 # curl uses HTTP_PROXY/HTTPS_PROXY automatically (passed as Docker build args).
@@ -20,15 +23,12 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
     no_proxy=${NO_PROXY} \
     JAVA_TOOL_OPTIONS=${PROXY_HOST:+"-Dhttp.proxyHost=${PROXY_HOST} -Dhttp.proxyPort=${PROXY_PORT} -Dhttps.proxyHost=${PROXY_HOST} -Dhttps.proxyPort=${PROXY_PORT}"}
 
-# Copy pre-downloaded Debezium connectors from build context.
-# These are downloaded locally and COPY'd into the build to avoid Maven Central rate-limiting.
-COPY connect/debezium-libs/debezium-connector-sqlserver-3.2.6.Final-plugin.tar.gz /tmp/
-COPY connect/debezium-libs/debezium-connector-postgres-3.2.6.Final-plugin.tar.gz /tmp/
-COPY connect/debezium-libs/debezium-connector-jdbc-3.2.6.Final-plugin.tar.gz /tmp/
-
-RUN tar -xzf /tmp/debezium-connector-sqlserver-3.2.6.Final-plugin.tar.gz -C /usr/share/confluent-hub-components/ && \
-    tar -xzf /tmp/debezium-connector-postgres-3.2.6.Final-plugin.tar.gz -C /usr/share/confluent-hub-components/ && \
-    tar -xzf /tmp/debezium-connector-jdbc-3.2.6.Final-plugin.tar.gz -C /usr/share/confluent-hub-components/
+# Install connectors from Confluent Hub.
+# Sources use the Debezium namespace but are Confluent-distributed and enterprise-support-covered.
+# Sink is the Confluent-authored JDBC connector (io.confluent.connect.jdbc.JdbcSinkConnector).
+RUN confluent-hub install --no-prompt debezium/debezium-connector-sqlserver:${DEBEZIUM_VERSION} && \
+    confluent-hub install --no-prompt debezium/debezium-connector-postgresql:${DEBEZIUM_VERSION} && \
+    confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:${CONFLUENT_JDBC_VERSION}
 
 # Clear proxy so it does not leak into Connect workers at runtime
 ENV JAVA_TOOL_OPTIONS= \
@@ -39,17 +39,14 @@ ENV JAVA_TOOL_OPTIONS= \
     https_proxy= \
     no_proxy=
 
-# Copy the Microsoft SQL Server JDBC driver (not bundled with Confluent or Debezium).
-# Download mssql-jdbc-12.4.2.jre11.jar from Microsoft and place it in connect/jars/ before building.
-COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
+# Copy the Microsoft SQL Server JDBC driver into the Confluent JDBC connector plugin directory.
+# Not bundled with the connector; must be present for jdbc:sqlserver:// URLs to resolve.
+COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-components/confluentinc-kafka-connect-jdbc/
 
 # SqlServerCaseRestorer SMT — pre-built JAR committed alongside mssql-jdbc.
 # No Maven build step required; works in proxy/air-gapped environments.
-# Copy to both jdbc sink connector dir and main confluent lib for classpath discovery.
-COPY connect/jars/kafka-connect-sqlserver-case-restorer-*.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
+# /usr/share/java/ is on the Connect worker classpath — sufficient for SMT discovery.
 COPY connect/jars/kafka-connect-sqlserver-case-restorer-*.jar /usr/share/java/
 
 # StripNullBytes SMT — pre-built thin JAR (no bundled deps) for stripping chr(0) from records.
-# Copy to both jdbc sink connector dir and main confluent lib for classpath discovery.
-COPY connect/jars/strip-null-bytes-smt.jar /usr/share/confluent-hub-components/debezium-connector-jdbc/
 COPY connect/jars/strip-null-bytes-smt.jar /usr/share/java/

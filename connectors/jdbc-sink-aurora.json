@@ -1,19 +1,18 @@
 {
   "name": "jdbc-sink-aurora",
   "config": {
-    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
+    "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
     "tasks.max": "${JDBC_SINK_AURORA_TASKS_MAX}",
     "batch.size": "${JDBC_SINK_AURORA_BATCH_SIZE}",
 
     "connection.url": "jdbc:postgresql://${AURORA_HOST}:${AURORA_PORT}/${AURORA_DATABASE}",
-    "connection.username": "${AURORA_USER}",
+    "connection.user": "${AURORA_USER}",
     "connection.password": "${AURORA_PASSWORD}",
 
     "topics.regex": "${JDBC_SINK_AURORA_TOPICS_REGEX}",
 
     "insert.mode": "upsert",
-    "primary.key.mode": "record_key",
-    "schema.evolution": "basic",
+    "pk.mode": "record_key",
     "auto.create": "true",
     "auto.evolve": "true",
     "delete.enabled": "true",

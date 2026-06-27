@@ -1,19 +1,18 @@
 {
   "name": "jdbc-sink-sqlserver",
   "config": {
-    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
+    "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
     "tasks.max": "${JDBC_SINK_SQLSERVER_TASKS_MAX}",
     "batch.size": "${JDBC_SINK_SQLSERVER_BATCH_SIZE}",
 
     "connection.url": "jdbc:sqlserver://${SQLSERVER_HOST}:${SQLSERVER_PORT};databaseName=${SQLSERVER_DATABASE};encrypt=false",
-    "connection.username": "${SQLSERVER_USER}",
+    "connection.user": "${SQLSERVER_USER}",
     "connection.password": "${SQLSERVER_PASSWORD}",
 
     "topics.regex": "${JDBC_SINK_SQLSERVER_TOPICS_REGEX}",
 
     "insert.mode": "upsert",
-    "primary.key.mode": "record_key",
-    "schema.evolution": "none",
+    "pk.mode": "record_key",
     "auto.create": "false",
     "auto.evolve": "false",
     "quote.identifiers": "true",
@@ -37,12 +36,6 @@
     "transforms.caseRestorer.jdbc.user": "${SQLSERVER_USER}",
     "transforms.caseRestorer.jdbc.password": "${SQLSERVER_PASSWORD}",
     "transforms.caseRestorer.table.schema": "dbo",
-
-    "column.naming.strategy": "com.example.kafka.connect.transforms.SqlServerColumnNamingStrategy",
-    "column.naming.strategy.jdbc.url": "jdbc:sqlserver://${SQLSERVER_HOST}:${SQLSERVER_PORT};databaseName=${SQLSERVER_DATABASE};encrypt=false",
-    "column.naming.strategy.jdbc.user": "${SQLSERVER_USER}",
-    "column.naming.strategy.jdbc.password": "${SQLSERVER_PASSWORD}",
-    "column.naming.strategy.table.schema": "dbo",
 
     "consumer.override.fetch.max.wait.ms": "10",
     "consumer.override.fetch.min.bytes": "1",

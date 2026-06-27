@@ -179,14 +179,13 @@ Create a temporary source connector that reads from the DLQ topic and writes to 
 {
   "name": "replay-dlq-aurora",
   "config": {
-    "connector.class": "io.debezium.connector.jdbc.JdbcSinkConnector",
+    "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
     "topics": "dlq-jdbc-sink-aurora",
     "connection.url": "jdbc:postgresql://${AURORA_HOST}:${AURORA_PORT}/${AURORA_DATABASE}",
-    "connection.username": "${AURORA_USER}",
+    "connection.user": "${AURORA_USER}",
     "connection.password": "${AURORA_PASSWORD}",
     "insert.mode": "upsert",
-    "primary.key.mode": "record_key",
-    "schema.evolution": "none",
+    "pk.mode": "record_key",
     "tasks.max": "1"
   }
 }
