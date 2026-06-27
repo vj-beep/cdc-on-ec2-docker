@@ -6,7 +6,7 @@ FROM confluentinc/cp-server-connect:${CP_VERSION}
 # Confluent Hub version strings drop the .Final suffix used in Maven Central artifacts.
 ARG DEBEZIUM_VERSION=3.2.6
 # Confluent JDBC sink replaces the community Debezium JDBC sink for enterprise support coverage.
-ARG CONFLUENT_JDBC_VERSION=10.8.0
+ARG CONFLUENT_JDBC_VERSION=10.9.5
 
 # Java proxy (JAVA_TOOL_OPTIONS is the JVMTI-spec JVM mechanism).
 # curl uses HTTP_PROXY/HTTPS_PROXY automatically (passed as Docker build args).
