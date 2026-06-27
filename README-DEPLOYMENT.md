@@ -52,7 +52,7 @@ Scripts run from **any machine with SSH access** to the nodes. Multi-node script
 | **2a** | `2a-deploy-repo.sh` | Clone this repo to all 5 EC2 nodes | 3 min |
 | **2b** | `2b-distribute-env.sh` | Copy .env to all 5 nodes (SSM or scp) | 2 min |
 | **3** | `3-setup-ec2.sh` | Install Docker, format NVMe, kernel tuning | 5 min |
-| **4** | `4-build-connect.sh` | Build custom Connect image with Debezium + JDBC | 1-2 min |
+| **4** | `4-build-connect.sh` | Build custom Connect image with Debezium + JDBC | 5-10 min |
 | **5** | `5-start-node.sh` | Start services (brokers → connect → monitor) | 1-5 min/node |
 | **6** | `6-deploy-connectors.sh` | Deploy 4 CDC connectors via REST API | 2 min |
 | **7** | `7-validate-deployment.sh` | Validate infrastructure, connectors, DLQ, consumer lag | 2-5 min |
@@ -360,9 +360,9 @@ Runs on **Node 4 (connect node)** only:
 - Builds `cdc-on-ec2-connect:${CP_VERSION}` using `connect/Dockerfile`
 - Downloads and installs: Debezium SQL Server, Debezium PostgreSQL, JDBC Sink plugins, SqlServerCaseRestorer SMT
 - Includes `mssql-jdbc` driver from `connect/jars/`
-- Debezium connectors pre-cached in `connect/debezium-libs/` (no download needed at build time)
-- SqlServerCaseRestorer SMT pre-built JAR in `connect/jars/` (no Maven build needed)
-- Takes 1-2 minutes (no Maven — all artifacts committed to git)
+- Connectors downloaded from Confluent Hub during build (`confluent-hub install`)
+- SqlServerCaseRestorer and StripNullBytes SMT pre-built JARs in `connect/jars/`
+- Takes 5-10 minutes (3x `confluent-hub install`, network speed dependent)
 
 **Alternative Approaches (Faster for Subsequent Deployments):**
 
