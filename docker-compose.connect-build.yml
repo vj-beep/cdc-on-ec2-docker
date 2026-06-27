@@ -21,7 +21,7 @@ services:
       network: host
       args:
         CP_VERSION: ${CP_VERSION:-8.0.0}
-        DEBEZIUM_VERSION: ${DEBEZIUM_VERSION:-3.2.6.Final}
+        DEBEZIUM_VERSION: ${DEBEZIUM_VERSION:-3.2.6}
         HTTP_PROXY: ${HTTP_PROXY:-}
         HTTPS_PROXY: ${HTTPS_PROXY:-}
         NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,169.254.169.254}
