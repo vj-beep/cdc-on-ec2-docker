@@ -11,7 +11,7 @@
 # Both JARs are committed — no build step required for customers
 !connect/jars/mssql-jdbc-*.jar
 !connect/jars/kafka-connect-sqlserver-case-restorer-*.jar
-monitoring/jmx-exporter/*.jar
+# JMX agent jar committed directly — Maven Central unreachable in proxy environments
 
 # Generated configs (resolved from .template by 5-start-node.sh)
 monitoring/prometheus/prometheus.yml
