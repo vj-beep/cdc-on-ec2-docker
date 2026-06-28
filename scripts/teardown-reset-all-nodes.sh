@@ -28,12 +28,19 @@
 #   6. Clear application logs
 #   7. Prune Docker system
 #
-# Result: Nodes are ready for fresh deployment (./scripts/5-start-node.sh)
+# Result: Docker/Kafka state wiped. Nodes need repo re-clone + image rebuild before restart.
+#
+# Full re-deployment sequence after teardown:
+#   1. 2a-deploy-repo.sh     — re-clone latest code on all nodes (source code is NOT wiped here)
+#   2. 2b-distribute-env.sh  — push updated .env to all nodes
+#   3. 4-build-connect.sh    — rebuild Connect image from fresh code
+#   4. 5-start-node.sh       — start each node (brokers first, then connect, then monitor)
 #
 # WARNING: This is DESTRUCTIVE and cannot be undone!
 # - All Kafka data is lost (topics, partitions, offsets)
 # - All connector state is lost
-# - Docker images must be rebuilt
+# - Docker images are removed (must rebuild via 4-build-connect.sh)
+# - Source code on nodes is NOT updated — run 2a-deploy-repo.sh to get latest
 ###############################################################################
 
 set -euo pipefail
@@ -427,10 +434,16 @@ echo "  • Succeeded: $SUCCESS_COUNT"
 echo "  • Time taken: ${DURATION}s"
 echo ""
 echo -e "${BLUE}Next steps:${NC}"
-echo "  1. Rebuild Connect image:"
+echo "  1. Re-clone latest code on all nodes (source code is NOT wiped by teardown):"
+echo "     ./scripts/2a-deploy-repo.sh"
+echo ""
+echo "  2. Push updated .env to all nodes:"
+echo "     ./scripts/2b-distribute-env.sh"
+echo ""
+echo "  3. Rebuild Connect image from latest source:"
 echo "     ./scripts/4-build-connect.sh"
 echo ""
-echo "  2. Start nodes (order matters — brokers first):"
+echo "  4. Start nodes (order matters — brokers first):"
 for node in "${NODES[@]}"; do
   echo "     ./scripts/5-start-node.sh $node"
 done
