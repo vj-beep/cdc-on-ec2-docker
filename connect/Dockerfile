@@ -44,15 +44,13 @@ ENV JAVA_TOOL_OPTIONS= \
 COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/confluent-hub-components/confluentinc-kafka-connect-jdbc/
 COPY connect/jars/postgresql-42.7.3.jar /usr/share/confluent-hub-components/confluentinc-kafka-connect-jdbc/
 
-# SqlServerCaseRestorer SMT — pre-built JAR committed alongside mssql-jdbc.
-# No Maven build step required; works in proxy/air-gapped environments.
-# /usr/share/java/ is on the Connect worker classpath — sufficient for SMT discovery.
+# SqlServerCaseRestorer SMT — copied into the JDBC plugin directory so it shares
+# the plugin classloader with mssql-jdbc. This is required: Connect 8.x loads SMTs
+# via the connector's plugin classloader, so Class.forName / DriverManager in the SMT
+# can only see jars in the same plugin directory, not /usr/share/java/.
+COPY connect/jars/kafka-connect-sqlserver-case-restorer-*.jar /usr/share/confluent-hub-components/confluentinc-kafka-connect-jdbc/
+# Also on worker classpath so Connect's transform scanner discovers the class.
 COPY connect/jars/kafka-connect-sqlserver-case-restorer-*.jar /usr/share/java/
 
-# MSSQL driver must also be on the worker classloader (/usr/share/java/) so that
-# SqlServerSchemaCache can reach it via DriverManager. The copy into the JDBC plugin
-# directory above is for the sink connector; this copy is for the SMT.
-COPY connect/jars/mssql-jdbc-12.4.2.jre11.jar /usr/share/java/
-
-# StripNullBytes SMT — pre-built thin JAR (no bundled deps) for stripping chr(0) from records.
+# StripNullBytes SMT — worker classpath only (no JDBC driver dependency).
 COPY connect/jars/strip-null-bytes-smt.jar /usr/share/java/
