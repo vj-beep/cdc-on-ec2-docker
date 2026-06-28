@@ -23,7 +23,17 @@
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "value.converter.schemas.enable": "true",
 
-    "transforms": "stripNullBytes,routeTopics,caseRestorer",
+    "transforms": "convertTs,convertTs2,stripNullBytes,routeTopics,caseRestorer",
+
+    "transforms.convertTs.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+    "transforms.convertTs.target.type": "Timestamp",
+    "transforms.convertTs.field": "createdat",
+    "transforms.convertTs.unix.precision": "milliseconds",
+
+    "transforms.convertTs2.type": "org.apache.kafka.connect.transforms.TimestampConverter$Value",
+    "transforms.convertTs2.target.type": "Timestamp",
+    "transforms.convertTs2.field": "updatedat",
+    "transforms.convertTs2.unix.precision": "milliseconds",
 
     "transforms.stripNullBytes.type": "com.example.kafka.connect.transforms.StripNullBytes",
 

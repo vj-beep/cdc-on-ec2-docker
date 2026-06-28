@@ -16,6 +16,7 @@
     "schema.include.list": "${AURORA_SCHEMA_INCLUDE_LIST}",
     "message.key.columns": "${AURORA_MESSAGE_KEY_COLUMNS}",
     "plugin.name": "pgoutput",
+    "decimal.handling.mode": "double",
     "slot.name": "${PG_SLOT_NAME}",
     "publication.name": "${PG_PUBLICATION_NAME}",
     "publication.autocreate.mode": "disabled",
