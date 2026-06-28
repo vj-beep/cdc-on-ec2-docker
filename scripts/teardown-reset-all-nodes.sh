@@ -28,19 +28,14 @@
 #   6. Clear application logs
 #   7. Prune Docker system
 #
-# Result: Docker/Kafka state wiped. Nodes need repo re-clone + image rebuild before restart.
-#
-# Full re-deployment sequence after teardown:
-#   1. 2a-deploy-repo.sh     — re-clone latest code on all nodes (source code is NOT wiped here)
-#   2. 2b-distribute-env.sh  — push updated .env to all nodes
-#   3. 4-build-connect.sh    — rebuild Connect image from fresh code
-#   4. 5-start-node.sh       — start each node (brokers first, then connect, then monitor)
+# Result: Nodes are fully clean — Docker state, Kafka data, and repo all wiped.
+#         Ready for phases 2a onwards (fresh clone + build + start).
 #
 # WARNING: This is DESTRUCTIVE and cannot be undone!
 # - All Kafka data is lost (topics, partitions, offsets)
 # - All connector state is lost
-# - Docker images are removed (must rebuild via 4-build-connect.sh)
-# - Source code on nodes is NOT updated — run 2a-deploy-repo.sh to get latest
+# - Docker images and containers removed
+# - Repo directory (/home/ec2-user/cdc-on-ec2-docker) removed
 ###############################################################################
 
 set -euo pipefail
@@ -244,6 +239,11 @@ rm -rf /home/ec2-user/.docker/logs /home/ec2-user/.docker/tmp /tmp/kafka* /tmp/z
 echo "[7/7] Pruning Docker system..."
 docker system prune -f 2>/dev/null || true
 
+# Step 8: Remove repo (source code wiped so next deploy starts from a clean clone)
+echo "[8/8] Removing repo directory..."
+rm -rf /home/ec2-user/cdc-on-ec2-docker 2>/dev/null || true
+echo "   Repo removed"
+
 # Final verification
 REMAINING=\$(docker ps -a --format "{{.Names}}" 2>/dev/null | wc -l)
 echo ""
@@ -251,6 +251,7 @@ echo "=== Teardown complete ==="
 echo "Remaining containers: \$REMAINING"
 echo "Remaining images: \$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | wc -l)"
 echo "Kafka dir exists: \$(test -d \$KAFKA_DATA_DIR && echo 'yes (empty)' || echo 'no')"
+echo "Repo dir exists: \$(test -d /home/ec2-user/cdc-on-ec2-docker && echo 'YES — not removed!' || echo 'no (clean)')"
 EOFCMD
 }
 
@@ -433,20 +434,11 @@ echo "  • Succeeded: $SUCCESS_COUNT"
 [[ $FAIL_COUNT -gt 0 ]] && echo -e "  • ${RED}Failed: $FAIL_COUNT${NC}"
 echo "  • Time taken: ${DURATION}s"
 echo ""
-echo -e "${BLUE}Next steps:${NC}"
-echo "  1. Re-clone latest code on all nodes (source code is NOT wiped by teardown):"
-echo "     ./scripts/2a-deploy-repo.sh"
-echo ""
-echo "  2. Push updated .env to all nodes:"
-echo "     ./scripts/2b-distribute-env.sh"
-echo ""
-echo "  3. Rebuild Connect image from latest source:"
-echo "     ./scripts/4-build-connect.sh"
-echo ""
-echo "  4. Start nodes (order matters — brokers first):"
+echo -e "${BLUE}Next steps — run phases 2a onwards:${NC}"
+echo "  ./scripts/2a-deploy-repo.sh"
+echo "  ./scripts/2b-distribute-env.sh"
+echo "  ./scripts/4-build-connect.sh"
 for node in "${NODES[@]}"; do
-  echo "     ./scripts/5-start-node.sh $node"
+  echo "  ./scripts/5-start-node.sh $node"
 done
-echo ""
-echo -e "${YELLOW}Note:${NC} First start after teardown takes 5-10 min (Docker image pulls)"
 echo ""
