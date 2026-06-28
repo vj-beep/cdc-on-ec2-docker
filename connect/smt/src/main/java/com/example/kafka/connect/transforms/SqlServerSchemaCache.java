@@ -125,6 +125,11 @@ public final class SqlServerSchemaCache {
             Map<String, Map<String, String>> newColumnMaps = new HashMap<>();
             Map<String, String> newFlatMap = new HashMap<>();
 
+            // Explicit driver load — required because the SMT classloader may not
+            // pick up META-INF/services registration from the mssql-jdbc jar.
+            try { Class.forName("com.microsoft.sqlserver.jdbc.SQLServerDriver"); }
+            catch (ClassNotFoundException e) { throw new RuntimeException("mssql-jdbc driver not found on classpath", e); }
+
             try (Connection conn = DriverManager.getConnection(jdbcUrl, user, password);
                  PreparedStatement ps = conn.prepareStatement(sql)) {
 
