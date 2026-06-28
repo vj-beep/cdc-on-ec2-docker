@@ -16,7 +16,7 @@
     "auto.create": "true",
     "auto.evolve": "true",
     "delete.enabled": "true",
-    "quote.identifiers": "false",
+    "quote.sql.identifiers": "never",
 
     "key.converter": "io.confluent.connect.avro.AvroConverter",
     "key.converter.schema.registry.url": "http://${CONNECT_1_IP}:${SCHEMA_REGISTRY_PORT}",
